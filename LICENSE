@@ -2,6 +2,13 @@ MIT License
 
 Copyright (c) 2026 cryptotradingaddiction
 
+This MIT license applies to original work maintained in this repository (Python
+sources, Windows batch orchestration scripts, documentation, and related files
+authored here). Third-party software obtained separately — in particular the
+TISEAN package from MPI PKS — is not covered here; it is distributed by its
+authors under the GNU General Public License v2. See the `COPYING` file in an
+official TISEAN download.
+
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
 in the Software without restriction, including without limitation the rights

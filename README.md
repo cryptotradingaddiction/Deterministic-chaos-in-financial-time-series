@@ -33,6 +33,7 @@ This project combines:
 - [Desktop GUI](#desktop-gui)
 - [Troubleshooting](#troubleshooting)
 - [Historical/Removed Components](#historicalremoved-components)
+- [Third-party: TISEAN](#third-party-tisean)
 - [Citation](#citation)
 - [License](#license)
 
@@ -943,14 +944,36 @@ Historical mentions may remain in methodology context, but operationally the pro
 
 ---
 
+## Third-party: TISEAN
+
+This repository **does not redistribute** the TISEAN source tree or compiled binaries. You install TISEAN yourself from the Max Planck Institute distribution and place `d2.exe`, `lyap_k.exe`, `recurr.exe`, etc. next to the shipped `.bat` files (or set `TISEAN_BIN`). Only the Windows orchestration scripts under `Tisean_3.0.0\bin\` are part of this project.
+
+**Upstream project and documentation**
+
+- MPI PKS — TISEAN homepage: [https://www.pks.mpg.de/tisean/](https://www.pks.mpg.de/tisean/)
+
+**Canonical article (methods / attribution)**
+
+Hegger, R., Kantz, H., & Schreiber, T. (1999). Practical implementation of nonlinear time series methods: The TISEAN package. *Chaos: An Interdisciplinary Journal of Nonlinear Science, 9*(2), 413–435. [https://doi.org/10.1063/1.166424](https://doi.org/10.1063/1.166424)
+
+**License of the TISEAN package**
+
+The official TISEAN distribution is released under the **GNU General Public License v2** (GPL-2.0). The full license text is shipped with upstream sources as the file **`COPYING`** in the root of the package you download from MPI PKS (GPLv2 text begins with “GNU GENERAL PUBLIC LICENSE Version 2, June 1991”). If you redistribute or modify TISEAN itself, comply with GPLv2; using this pipeline only as a caller of unmodified binaries is typically governed by those terms as well — when in doubt, read **`COPYING`** in your local TISEAN tree or consult the upstream maintainers.
+
+---
+
 ## Citation
 
-If citing TISEAN package methodology:
-
-Hegger, R., Kantz, H., & Schreiber, T. (1999). Practical implementation of nonlinear time series methods: The TISEAN package. *Chaos: An Interdisciplinary Journal of Nonlinear Science, 9*(2), 413-435. [https://doi.org/10.1063/1.166424](https://doi.org/10.1063/1.166424)
+When citing **TISEAN** in publications, use Hegger, Kantz, & Schreiber (1999) as above; see [Third-party: TISEAN](#third-party-tisean) for links.
 
 ---
 
 ## License
 
-MIT License. See `LICENSE`.
+**This repository (original Python code, batch orchestrators, documentation, and other files authored here)** is licensed under the **MIT License**.
+
+Copyright (c) 2026 cryptotradingaddiction
+
+See the full MIT text in [`LICENSE`](LICENSE).
+
+**Third-party:** TISEAN is **not** covered by that MIT grant; it remains under its **GPL-2.0** license from MPI PKS when you obtain and use the upstream package — see [Third-party: TISEAN](#third-party-tisean).

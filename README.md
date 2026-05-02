@@ -905,6 +905,8 @@ Batch runs `lyap_k.exe` + LLE hypothesis. `predictability.py` is a separate auxi
 
 Batch runs `recurr.exe`, then `rqa_values.py`, then RQA hypothesis.
 
+`rqa_values.py` reads **`TAU_RQA_<sym>`**, **`RAD_RQA_<sym>`**, and **`W_D2_<sym>`** (Theiler window, same as `hypothesis.py`) from `Tisean_3.0.0\bin\_per_coin_settings.bat` via `config_loader.parse_per_coin_settings_bat` / `rqa_params_for_symbol`. Embedding dimension is fixed at **m = 3** (matches `RQA.bat` `EMBED_DIM` and `hypothesis.py`). Series length follows **`DCH_TEST_MODE`**: first **2000** points in test mode, full series otherwise.
+
 ### `print_results.py`
 
 Parsing and aggregates for console logs and surrogate summaries.

@@ -2,6 +2,7 @@
 import argparse
 import concurrent.futures
 import glob
+import logging
 import os
 import shutil
 import subprocess
@@ -19,6 +20,8 @@ warnings.filterwarnings("ignore", category=RuntimeWarning)
 warnings.filterwarnings("ignore", category=UserWarning)
 
 from surrogate_sampling import generate_permuted_samples, load_series_1d
+
+logger = logging.getLogger(__name__)
 
 FULL_B = 100
 TEST_B = 100
@@ -359,8 +362,15 @@ def process_single_bootstrap(args_tuple):
             for k in RQA_KEYS:
                 if k in result:
                     result[k] = rqa_vals.get(k, np.nan)
+    except subprocess.CalledProcessError:
+        logger.exception(
+            "Surrogate replicate i=%d: TISEAN subprocess failed (see returncode/cmd in traceback)",
+            i,
+        )
+    except OSError:
+        logger.exception("Surrogate replicate i=%d: I/O error", i)
     except Exception:
-        pass
+        logger.exception("Surrogate replicate i=%d: unexpected error", i)
     finally:
         for tmp in glob.glob(prefix + "*"):
             try:
@@ -423,23 +433,23 @@ def empirical_surrogate_test(
     bd = bd[np.isfinite(bd)]
     b_reps = len(bd)
     if b_reps < 1 or not np.isfinite(orig_val):
-        return float("nan"), float("nan"), float("nan"), "insufficient data"
+        return np.nan, np.nan, np.nan, "insufficient data"
 
     m = float(np.mean(bd))
     sd = float(np.std(bd, ddof=1)) if b_reps > 1 else 0.0
-    se = sd / np.sqrt(b_reps) if b_reps > 0 else float("nan")
+    se = sd / np.sqrt(b_reps) if b_reps > 0 else np.nan
 
     if sd > 0:
         z_sigma = float((orig_val - m) / sd)
     elif np.isfinite(orig_val) and np.isfinite(m) and np.isclose(orig_val, m, rtol=0.0, atol=1e-12):
         z_sigma = 0.0
     else:
-        z_sigma = float(np.sign(orig_val - m)) * float("inf")
+        z_sigma = float(np.sign(orig_val - m)) * np.inf
 
     if np.isfinite(se) and se > 0:
         z_se = float((orig_val - m) / se)
     else:
-        z_se = float("nan")
+        z_se = np.nan
 
     ge = int(np.sum(bd >= orig_val))
     le = int(np.sum(bd <= orig_val))
@@ -464,7 +474,7 @@ def empirical_surrogate_test(
 def predictability_time(lle, eps=PRED_EPSILON, tol=PRED_TOLERANCE):
     """T = (1/lambda) * log(tol/eps) for lambda > 0; nan otherwise."""
     if lle is None or not np.isfinite(lle) or lle <= 0:
-        return float("nan")
+        return np.nan
     return float((1.0 / lle) * np.log(tol / eps))
 
 
@@ -494,6 +504,12 @@ def main():
         help="Number of contiguous blocks used for block-permutation surrogate generation (default 100).",
     )
     args = parser.parse_args()
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+        datefmt="%H:%M:%S",
+    )
 
     os.makedirs(args.output_dir, exist_ok=True)
 
@@ -555,7 +571,7 @@ def main():
         p_values[k] = p_val
         decisions[k] = dec
 
-    lle_orig = orig.get("LLE", float("nan"))
+    lle_orig = orig.get("LLE", np.nan)
     T_orig = predictability_time(lle_orig)
     lle_boot = boot_clean.get("LLE", np.array([]))
     pos_lle_boot = lle_boot[(np.isfinite(lle_boot)) & (lle_boot > 0)] if len(lle_boot) else np.array([])
@@ -566,9 +582,9 @@ def main():
         T_boot_hi = float(np.percentile(T_boot, 97.5))
         T_boot_n = int(pos_lle_boot.size)
     else:
-        T_boot_mean = float("nan")
-        T_boot_lo = float("nan")
-        T_boot_hi = float("nan")
+        T_boot_mean = np.nan
+        T_boot_lo = np.nan
+        T_boot_hi = np.nan
         T_boot_n = 0
 
     summary_file = os.path.join(args.output_dir, f"{args.base}_surrogate_summary.txt")

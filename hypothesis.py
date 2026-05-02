@@ -34,9 +34,8 @@ METRICS_SCOPE_D2_K2_LLE_RQA = "d2_k2_lle_rqa"
 ALL_METRICS = ("D2", "K2", "LLE", *RQA_KEYS)
 
 
-def metric_names_for_scope(metrics_scope):
-    if metrics_scope in (METRICS_SCOPE_D2_K2_LLE_RQA, METRICS_SCOPE_FULL):
-        return ["D2", "K2", "LLE", *RQA_KEYS]
+def metric_names_for_scope(_metrics_scope=None):
+    """Default metric set for full-scope runs (argument kept for call-site compatibility)."""
     return ["D2", "K2", "LLE", *RQA_KEYS]
 
 
@@ -509,7 +508,7 @@ def main():
     print(
         f"  -> Surrogates: block permutation (N_blocks={args.surrogate_blocks}); "
         "inference: empirical p from surrogate ranks (Theiler-style); "
-        "z_sigma / z_SE(B) descriptive only; decision by p<0.05."
+        f"z_sigma / z_SE(B={b_reps}) (column label) descriptive only; decision by p<0.05."
     )
 
     orig_data = load_data(args.input)
@@ -586,14 +585,14 @@ def main():
             "Inference : empirical p-values from surrogate counts (+1 / B+1 correction); "
             "tails: D2,K2=lower; LLE=upper; RQA=two_sided (see METRIC_EMPIRICAL_TAIL in hypothesis.py). "
             "z_sigma = (orig-mean)/SD(surr) (Theiler-style, descriptive); "
-            "z_SE(B) = (orig-mean)/(SD/sqrt(B)) depends on B (descriptive only). "
+            f"z_SE(B={b_reps}) = (orig-mean)/(SD/sqrt(B)) — SE uses this run’s B (descriptive only). "
             "Reject H0 if p < 0.05.\n\n"
         )
         handle.write(
-            "Invariant       Orig.    Mean(surr)  SD(surr)    z_sigma   z_SE(B)    p-value    decision\n"
+            f"Invariant       Orig.    Mean(surr)  SD(surr)    z_sigma   z_SE(B={b_reps})    p-value    decision\n"
         )
         handle.write(
-            "---------------------------------------------------------------------------------------------------\n"
+            "--------------------------------------------------------------------------------------------------------\n"
         )
 
         def _fmt_zcol(z: float) -> str:

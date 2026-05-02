@@ -373,7 +373,7 @@ z_SE    = (X_orig - mu_surr) / SE_surr     # SE_surr = SD(surr)/sqrt(B); depends
 
 Decision: if `p < 0.05` -> reject `H0`; else fail to reject `H0`.
 
-Summary files report `SD(surr)`, `z_sigma`, `z_SE` (as `z_SE(B)`), **empirical** `p-value`, and the text `decision` per row.
+Summary files report `SD(surr)`, `z_sigma`, `z_SE` with **explicit B in the column header** (e.g. `z_SE(B=100)`), **empirical** `p-value`, and the text `decision` per row.
 
 ### Replicate count
 
@@ -425,7 +425,7 @@ In each `<BASE>_surrogate_summary.txt`, key columns are:
 - `Mean(surr)` - average across surrogates,
 - `SD(surr)` - sample SD across surrogates,
 - `z_sigma` - `(Orig. − Mean(surr)) / SD(surr)` (Theiler-style; descriptive),
-- `z_SE(B)` - `(Orig. − Mean(surr)) / SE(surr)` with `SE = SD/√B` (descriptive; **depends on B**),
+- `z_SE(B=<run>)` - column header prints the actual replicate count (e.g. `z_SE(B=100)`). Statistic: `(Orig. − Mean(surr)) / SE(surr)` with `SE = SD/√B` (descriptive; **not comparable across different B** without rescaling),
 - `p-value` - **empirical** p-value from surrogate rank counts (see [Statistical Model](#statistical-model-current-supervisor-aligned)),
 - `decision` - per-metric `reject H0` / `fail to reject H0` (and `insufficient data` if applicable).
 

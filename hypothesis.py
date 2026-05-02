@@ -8,7 +8,6 @@ import subprocess
 import warnings
 
 import numpy as np
-import scipy.stats as stats
 from pyrqa.analysis_type import Classic
 from pyrqa.computation import RQAComputation
 from pyrqa.metric import EuclideanMetric
@@ -384,36 +383,73 @@ def safe_std(arr):
     return float(np.std(arr, ddof=1)) if len(arr) > 1 else (float(np.std(arr)) if len(arr) == 1 else np.nan)
 
 
-def sigma_score_test(
+# Empirical tail for p = (1 + #{...}) / (B + 1); see Theiler et al. style surrogate testing.
+# D2/K2: typically test whether original is unusually small vs surrogates (lower tail).
+# LLE: typically unusually large (upper tail). RQA scalars: omnibus two-sided combination.
+METRIC_EMPIRICAL_TAIL = {
+    "D2": "lower",
+    "K2": "lower",
+    "LLE": "upper",
+    "RR": "two_sided",
+    "DET": "two_sided",
+    "LAM": "two_sided",
+    "MAXLINE": "two_sided",
+    "ENTR": "two_sided",
+    "TT": "two_sided",
+}
+
+
+def empirical_surrogate_test(
     boot_dist: np.ndarray,
     orig_val: float,
+    tail: str,
 ) -> tuple[float, float, str]:
     """
-    One-sample t-test style statistic against surrogate distribution:
-    SE = SD(surr) / sqrt(B), t = |orig - mean(surr)| / SE.
-    p-value is computed from Student t CDF (df=B-1) using t.
-    Decision rule: reject H0 if p < 0.05.
+    Rank/count empirical p-value from B surrogate replicates (no Gaussian / t-assumption).
+
+    Let T_1..T_B be surrogate metric values. Define:
+      p_upper = (1 + #{T_i >= T_orig}) / (B + 1)
+      p_lower = (1 + #{T_i <= T_orig}) / (B + 1)
+
+    tail='upper' uses p_upper; 'lower' uses p_lower.
+    tail='two_sided' uses min(1, 2 * min(p_upper, p_lower)) when direction is not fixed a priori.
+
+    Also returns z_descr = |T_orig - mean(T)| / SE(T) with SE = SD/sqrt(B) for display only — not used for p.
+
+    Decision: reject H0 if p < 0.05.
     """
     bd = np.asarray(boot_dist, dtype=float)
     bd = bd[np.isfinite(bd)]
-    if len(bd) < 2 or not np.isfinite(orig_val):
-        return float("nan"), float("nan"), "insufficient data"
-    m = float(np.mean(bd))
-    sd = float(np.std(bd, ddof=1))
     b_reps = len(bd)
+    if b_reps < 1 or not np.isfinite(orig_val):
+        return float("nan"), float("nan"), "insufficient data"
+
+    m = float(np.mean(bd))
+    sd = float(np.std(bd, ddof=1)) if b_reps > 1 else 0.0
     se = sd / np.sqrt(b_reps) if b_reps > 0 else float("nan")
-    if se == 0 or not np.isfinite(se):
-        t_stat = float("inf") if orig_val != m else 0.0
+    if se > 0 and np.isfinite(se):
+        z_descr = abs(orig_val - m) / se
     else:
-        t_stat = abs(orig_val - m) / se
-    if np.isfinite(t_stat):
-        p_val = 2 * (1 - stats.t.cdf(t_stat, df=b_reps - 1))
+        z_descr = float("inf") if orig_val != m else 0.0
+
+    ge = int(np.sum(bd >= orig_val))
+    le = int(np.sum(bd <= orig_val))
+    p_upper = (1 + ge) / (b_reps + 1)
+    p_lower = (1 + le) / (b_reps + 1)
+
+    if tail == "upper":
+        p_val = p_upper
+    elif tail == "lower":
+        p_val = p_lower
+    elif tail == "two_sided":
+        p_val = min(1.0, 2.0 * min(p_upper, p_lower))
     else:
-        p_val = float("nan")
-    decision = "reject H0" if (not np.isnan(p_val)) and (p_val < 0.05) else "fail to reject H0"
-    if np.isnan(t_stat):
-        decision = "insufficient data"
-    return float(t_stat), float(p_val), decision
+        raise ValueError(f"unknown tail mode: {tail!r}")
+
+    decision = (
+        "reject H0" if np.isfinite(p_val) and (p_val < 0.05) else "fail to reject H0"
+    )
+    return float(z_descr), float(p_val), decision
 
 
 def predictability_time(lle, eps=PRED_EPSILON, tol=PRED_TOLERANCE):
@@ -462,7 +498,8 @@ def main():
     print(f"  -> Mode: {'TEST' if test_mode else 'FULL'}, surrogate replicates B={b_reps}, metrics={metrics_label}")
     print(
         f"  -> Surrogates: block permutation (N_blocks={args.surrogate_blocks}); "
-        "inference: SE=SD/sqrt(B), t=|orig-mean|/SE, decision by p<0.05."
+        "inference: empirical p from surrogate ranks (Theiler-style); "
+        "SE and z_descr are descriptive only; decision by p<0.05."
     )
 
     orig_data = load_data(args.input)
@@ -501,7 +538,8 @@ def main():
     p_values = {}
     decisions = {}
     for k in metric_names:
-        score, p_val, dec = sigma_score_test(boot_clean[k], orig[k])
+        tail_k = METRIC_EMPIRICAL_TAIL.get(k, "two_sided")
+        score, p_val, dec = empirical_surrogate_test(boot_clean[k], orig[k], tail_k)
         scores[k] = score
         p_values[k] = p_val
         decisions[k] = dec
@@ -533,11 +571,13 @@ def main():
         handle.write(f"Mode: {'TEST' if test_mode else 'FULL'}\n")
         handle.write("Surrogates: block permutation of observed series (contiguous blocks shuffled in random order).\n")
         handle.write(
-            "Inference : SE = SD(surr)/sqrt(B), t = |orig - mean(surr)| / SE(surr), "
-            "p = 2*(1 - t_cdf(t, df=B-1)), reject if p < 0.05\n\n"
+            "Inference : empirical p-values from surrogate counts (+1 / B+1 correction); "
+            "tails: D2,K2=lower; LLE=upper; RQA=two_sided (see METRIC_EMPIRICAL_TAIL in hypothesis.py). "
+            "SE = SD(surr)/sqrt(B) and z_descr = |orig-mean|/SE are descriptive only. "
+            "Reject H0 if p < 0.05.\n\n"
         )
         handle.write(
-            "Invariant       Orig.    Mean(surr)  SD(surr)      SE(surr)     t-stat    p-value\n"
+            "Invariant       Orig.    Mean(surr)  SD(surr)      SE(surr)    z_descr    p-value\n"
         )
         handle.write("---------------------------------------------------------------------------------\n")
         for metric in metric_names:

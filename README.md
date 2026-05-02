@@ -8,7 +8,7 @@ This project combines:
 - log-return preprocessing,
 - invariant estimation via TISEAN,
 - recurrence quantification via `PyRQA`,
-- statistical surrogate testing with block permutation, SE-based t-statistic, and p-value decision rule (`p < 0.05`).
+- statistical surrogate testing with block permutation, **empirical rank-based p-values** (surrogate literature style), and decision rule (`p < 0.05`).
 
 ---
 
@@ -69,10 +69,9 @@ The hypothesis part is distributed across per-invariant batch scripts and consol
 ### Statistical model currently used
 
 - Surrogates: **block permutation surrogates** (not point-wise shuffle).
-- Test statistic: `t = |X_orig - mu_surr| / SE_surr`.
-- Explicit two-sided p-value from Student t CDF with `df=B-1`.
+- **Inference:** empirical **p-values from ranks/counts** over `B` surrogate metric draws (no Gaussian / Student‑t assumption on the surrogate distribution).
+- **Descriptive only:** `SE_surr = SD(surr)/sqrt(B)` and `z_descr = |X_orig - mu_surr| / SE_surr` are reported for scale — **they do not define p**.
 - Decision rule: reject `H0` if `p-value < 0.05`.
-- `SE_surr` is computed as `SD(surr)/sqrt(B)` (standard error of surrogate mean).
 
 ---
 
@@ -350,31 +349,31 @@ Implemented in `surrogate_sampling.py`:
 
 This preserves short-range structure inside blocks while destroying global ordering.
 
-### Score computation
+### Score computation (empirical p-values)
 
-For each metric:
+For each metric, let `T_1 … T_B` be surrogate draws and `T_orig` the original-series metric.
+
+With the `(B+1)` correction:
+
+- **Upper tail** (e.g. **LLE**):  
+  `p = (1 + #{ i : T_i >= T_orig }) / (B + 1)`
+- **Lower tail** (e.g. **D2**, **K2**):  
+  `p = (1 + #{ i : T_i <= T_orig }) / (B + 1)`
+- **Two-sided omnibus** (RQA scalars when direction is not fixed a priori):  
+  `p = min(1, 2 * min(p_upper, p_lower))` with the same `p_upper`, `p_lower` as above.
+
+Tails are set in `METRIC_EMPIRICAL_TAIL` in `hypothesis.py` (edit there if you need metric-specific one- vs two-sided tests).
+
+**Descriptive columns (not used for p):**
 
 ```text
 SE_surr = SD(surr) / sqrt(B)
-t = |X_orig - mu_surr| / SE_surr
+z_descr   = |X_orig - mu_surr| / SE_surr
 ```
 
-where:
+Decision: if `p < 0.05` -> reject `H0`; else fail to reject `H0`.
 
-- `X_orig` = metric from original time series,
-- `mu_surr` = mean of metric across surrogate runs,
-- `SE_surr` = standard error of surrogate mean (`SD(surr)/sqrt(B)`).
-
-Decision:
-
-- compute `p = 2 * (1 - CDF_t(t, df=B-1))`,
-- if `p < 0.05` -> reject `H0`,
-- else -> fail to reject `H0`.
-
-Implementation notes:
-
-- the inferential denominator is **SE of the surrogate mean** (`SD(surr)/sqrt(B)`), not raw `SD(surr)` alone,
-- summary files report `SD(surr)`, `SE(surr)`, `t-stat`, and `p-value` per metric.
+Summary files report `SD(surr)`, `SE(surr)`, `z_descr`, and **empirical** `p-value` per metric.
 
 ### Replicate count
 
@@ -425,8 +424,8 @@ In each `<BASE>_surrogate_summary.txt`, key columns are:
 - `Orig.` - metric value on original data,
 - `Mean(surr)` - average across surrogates,
 - `SD(surr)` - sample SD across surrogates,
-- `t-stat` - test statistic `t`,
-- `p-value` - two-sided p-value from `t` with `df=B-1`.
+- `z_descr` - `|Orig. − Mean(surr)| / SE(surr)` (descriptive only; not the basis for `p-value`),
+- `p-value` - **empirical** p-value from surrogate rank counts (`(1 + #{extremal surrogates})/(B+1)`-style; see [Statistical Model](#statistical-model-current-supervisor-aligned)).
 
 Interpretation:
 

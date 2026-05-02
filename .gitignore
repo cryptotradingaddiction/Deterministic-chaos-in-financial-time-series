@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+*.egg-info/
+.eggs/
+dist/
+build/
+*.spec.bak
+
+# Local paths — copy from config.example.yaml
+config.yaml
+
+# Downloaded market data & pipeline outputs (large)
+data/
+
+# Local MPI TISEAN tree (sources, docs, *.exe). Repo tracks only `bin/*.bat`; install
+# binaries from https://www.pks.mpg.de/tisean/ after clone (see README).
+/Tisean_3.0.0/
+
+# PyInstaller / packaging artifacts
+*.manifest
+
+# IDE & OS
+.idea/
+.vscode/
+*.swp
+Thumbs.db
+Desktop.ini

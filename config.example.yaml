@@ -1,0 +1,18 @@
+paths:
+  # Main project data directory used by scripts.
+  data_dir: "C:\\DCh\\data"
+
+download:
+  # Optional global start date override for crypto_data_all.py.
+  # If null, each symbol starts from its default listing date.
+  from: null
+
+  # Optional global end date override for crypto_data_all.py.
+  # If null, current UTC date is used automatically.
+  to: null
+
+files:
+  # Canonical filename suffixes used in this project.
+  raw_csv_suffix: "_BITSTAMP_1h_complete.csv"
+  logreturns_dat_suffix: "_BITSTAMP_1h_complete_logreturns.dat"
+  logreturns_csv_suffix: "_BITSTAMP_1h_complete_logreturns.csv"

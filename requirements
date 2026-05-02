@@ -1,0 +1,24 @@
+# Project requirements
+#
+# Install Python packages with:
+#   py -3 -m pip install -r requirements
+#
+# NOTE: TISEAN and gnuplot are system tools, not pip packages.
+# You must install them manually:
+#   - TISEAN (required): https://www.pks.mpg.de/tisean/
+#   - gnuplot (required for plots): http://www.gnuplot.info/
+#
+# Expected Windows paths in this project:
+#   - TISEAN: C:\DCh\Tisean_3.0.0\bin
+#   - gnuplot: C:\Program Files\gnuplot\bin\gnuplot.exe
+
+numpy
+scipy
+pandas
+matplotlib
+ccxt
+pyrqa
+nolds
+scikit-learn
+PyYAML
+PySide6

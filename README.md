@@ -56,6 +56,7 @@ The hypothesis part is distributed across per-invariant batch scripts and consol
 
 ## Current Architecture (Important)
 
+
 ### Active execution model
 
 - `run1` is removed from active workflow.
@@ -78,9 +79,10 @@ The hypothesis part is distributed across per-invariant batch scripts and consol
 
 ## Quick Start
 
+
 ### 1) Install Python dependencies
 
-The dependency list is the extensionless file `requirements` at the repo root (not `requirements.txt`):
+Use **Python 3.10+** (3.12 is a common choice on Windows). The dependency list is the extensionless file `requirements` at the repo root (not `requirements.txt`). Packages are grouped in that file (numerics, plotting, ML, exchange API, PyRQA, `nolds`, YAML, GUI) with compatible version ranges.
 
 ```bat
 py -3 -m pip install -r requirements
@@ -247,6 +249,7 @@ Some steps call **`powershell -NoProfile -Command "..."`** to trim the first 200
 
 ## End-to-End Workflow
 
+
 ### Step 1 - Download raw candles
 
 ```bat
@@ -287,6 +290,7 @@ What happens per symbol:
 
 ## Distributed Hypothesis Workflow
 
+
 ### Why distributed
 
 Each invariant family has different output files, parameterization, and practical compute profile. Running hypothesis testing inside each invariant script keeps:
@@ -309,6 +313,7 @@ Each invariant family has different output files, parameterization, and practica
 ---
 
 ## Statistical Model (Current, Supervisor-Aligned)
+
 
 ### Null and alternative hypotheses
 
@@ -359,6 +364,7 @@ In `hypothesis.py`, surrogate replicate count **`B`** is **100** in both modes (
 ---
 
 ## Outputs and Folder Structure
+
 
 ### Root result folders
 
@@ -437,6 +443,7 @@ Operational notes:
 ---
 
 ## Repository Map
+
 
 ### Core pipeline scripts
 
@@ -541,97 +548,57 @@ Chosen τ is **only advisory** for `_per_coin_settings.bat`; batch pipelines do 
 
 Standalone Python implementation of **Cao (1997)**. It does **not** call TISEAN.
 
-**Scope.** This repository implements **Cao’s method only**. Course notes and some textbooks introduce **False Nearest Neighbors (FNN)** first, with subjective thresholds (for example \(R_T\), \(A_T\)) and an attractor-radius check involving \(R_A\). That FNN machinery is **not** implemented here. Every quantity below is defined and computed in **`cao_.py`** only.
+Step-by-step labels (`STEP 1` … `STEP 4`, Takens → NN → `(m+1)` distance → `a_i`) match the comments in **`cao_.py`** (`calculate_for_m`), including Chebyshev norm and `a_i` as distance ratio.
 
 ### Primary reference (paper)
 
 Cao, L. (1997). Practical method for determining the minimum embedding dimension of a scalar time series. *Physica D*, *110*(1–2), 43–50. [https://doi.org/10.1016/S0167-2789(97)00118-8](https://doi.org/10.1016/S0167-2789(97)00118-8)
 
-### Textbook-style equations vs this code
+### Paper ↔ code correspondence (Cao)
 
-Many slides use the **Euclidean** norm \(\|\cdot\|_2\) in the ratio that defines neighbor stretching. **Cao (1997) uses the maximum (Chebyshev) norm** \(\|\cdot\|_\infty\). This implementation follows the **paper** (and common TISEAN-style usage): `NearestNeighbors(..., metric='chebyshev')`. If you compare numbers to a Euclidean derivation, they will not match.
+| Idea in Cao (1997) | Implementation |
+|--------------------|----------------|
+| Takens vectors `X_m` with delay `τ` | Columns `data[k*τ : …]` for `k = 0 … m−1`; valid length `N_valid = N − m·τ`. |
+| Nearest neighbour in dimension `m`, **maximum norm** | `NearestNeighbors(..., metric='chebyshev')`; neighbour index `1` skips self-match. |
+| Distance in `m+1` vs `m` | Chebyshev in `(m+1)` is `max(d_m, abs diff new coordinate)`; ratio **a_i(m)** as in code (`distance_m_plus_1 / nn_distance`). **Source of truth:** `cao_.py` (one inline comment mentions an equation number from a specific printing — the code definitions prevail). |
+| **E(m)**, **E\*(m)** | Means of `a_i` and of `\|Δ new coord.\|` respectively. |
+| **E1(m) = E(m+1)/E(m)**, **E2(m) = E\*(m+1)/E\*(m)** | Built after parallel passes over `m = 1 … d_max+1`. |
 
-**Typical textbook symbols** (e.g. relations analogous to “\(a(t_i,m)\)”, \(E(m)\), \(E^*(m)\), \(E_1\), \(E_2\)) map to code as follows:
+### Geometry and notation
 
-| Symbol / idea | Meaning | Variable / expression in `cao_.py` |
-|---------------|---------|-------------------------------------|
-| \(\mathbf{X}_m(t_i)\) | Delay embedding row \(i\) in dimension \(m\) | Row `X_m[i, :]` |
-| \(\mathbf{X}_m^{\mathrm{NN}}(t_i)\) | Nearest neighbor of row \(i\) in \(m\) dimensions | Row `X_m[nn_index[i], :]` |
-| \(a(t_i,m)\) | Ratio: distance in \(m{+}1\) to **same** NN, divided by distance in \(m\) | `a_i = distance_m_plus_1 / nn_distance` |
-| \(E(m)\) | Mean of \(a(t_i,m)\) over valid \(i\) | `E_m = np.mean(a_i)` |
-| \(E^*(m)\) | Mean absolute difference on the **new coordinate only** between \(i\) and its NN | `E_star_m = np.mean(abs_diff_new)` |
-| \(E_1(m)=E(m{+}1)/E(m)\) | Saturation statistic vs \(m\) | `E1[m] = E[m+1] / E[m]` then `return E1[1:]` |
-| \(E_2(m)=E^*(m{+}1)/E^*(m)\) | Stochastic vs deterministic diagnostic | `E2[m] = E_star[m+1] / E_star[m]` then `return E2[1:]` |
+- Scalar series `data` length `N`. Takens embedding with integer delay `τ` and dimension `m`:
+  - Valid points: `N_valid = N - m·τ`.
+  - Row `i` of `X_m`: `[data[i], data[i+τ], …, data[i+(m-1)τ]]`.
 
-**Indexing.** Code uses **0-based** arrays. Reconstructed vector at starting index \(i\) is \(\mathbf{X}_m(t_i) = [x(i), x(i+\tau),\ldots,x(i+(m-1)\tau)]\), implemented as `X_m[:, k] = data[k*tau : N_valid + k*tau]` so row `i` equals `[data[i], data[i+tau], …]`.
+### Nearest neighbours
 
-**Sample count.** \(N_{\mathrm{valid}} = N - m\tau\) is the number of rows of `X_m` (`N = len(data)`). That matches a textbook sum over \(i = 1,\ldots,N-m\tau\) when you translate to \(i = 0,\ldots,N_{\mathrm{valid}}-1\).
+- Metric: **Chebyshev** (`L∞`): `NearestNeighbors(..., metric='chebyshev', algorithm='kd_tree', n_neighbors=2)`.
+- Index `1` is the **true** NN (index `0` is the query point itself).
+- If distance `0`, `find_nonzero_neighbor` increases `k` until a positive-distance neighbour is found (avoids division by zero in ratios).
 
-### Why Chebyshev implies `max(nn_distance, abs_diff_new)`
+### Cao statistics (per `m`)
 
-With the **maximum norm**, the distance between two points in \(m{+}1\) dimensions is the largest edge length along any coordinate. For the **same** pair \((i,\mathrm{NN})\) already identified in dimension \(m\), the distance in \(m{+}1\) is not recomputed as a full \((m{+}1)\)-vector Euclidean length in this code; it is the componentwise maximum of:
+Let `a_i(m)` be the ratio of `(m+1)`-dimensional Chebyshev NN distance to `m`-dimensional NN distance for point `i` (see code: uses `max(nn_distance, |new_coord_diff|)` for the `(m+1)` distance). Then:
 
-- `nn_distance`: Chebyshev distance between \(\mathbf{X}_m(t_i)\) and \(\mathbf{X}_m^{\mathrm{NN}}(t_i)\), and  
-- `abs_diff_new`: \(|x(i+m\tau) - x^{\mathrm{NN}}(i+m\tau)|\) — the absolute gap on the **sole new coordinate** when both trajectories are extended from \(m\) to \(m{+}1\) **without** shifting the window start.
+- `E(m) = mean_i a_i(m)`
+- `E*(m) = mean_i |x_i^{new} - x_{NN}^{new}|` (average absolute increment on the new coordinate only)
 
-Hence `distance_m_plus_1 = np.maximum(nn_distance, abs_diff_new)`. This is exactly what you want for **\(L_\infty\)**, not for **\(L_2\)**.
+From arrays `E(m)` and `E*(m)` for `m = 1 .. d_max+1`:
 
-### Detailed walkthrough: `calculate_for_m(m, data, tau, d_max)`
+- `E1(m) = E(m+1) / E(m)` — saturates when embedding dimension is sufficient (false neighbours stop growing).
+- `E2(m) = E*(m+1) / E*(m)` — tends to **1** for stochastic-looking trajectories; deviations support deterministic structure (see Cao, 1997).
 
-All logic is in **`calculate_for_m`**.
-
-1. **`N_valid = N - m*tau`.** If `N_valid < 2`, the function returns `(m, nan, nan)` — not enough distinct embedding vectors for meaningful nearest neighbours.
-
-2. **Takens matrix `X_m`** with shape `(N_valid, m)`. Column `k` is the series delayed by `k*tau`:  
-   `X_m[:, k] = data[k*tau : N_valid + k*tau]`.
-
-3. **Nearest neighbours in dimension \(m\).**  
-   `NearestNeighbors(n_neighbors=2, metric='chebyshev', algorithm='kd_tree', n_jobs=1).fit(X_m)`.  
-   `kneighbors` returns the query point as neighbour `0` and the true NN as neighbour `1`:  
-   `nn_distance = distances[:, 1]`, `nn_index = indices[:, 1]`.
-
-4. **Zero distance.** If `nn_distance[i] == 0`, **`find_nonzero_neighbor`** queries more neighbours (`start_k=3`, up to `max_k`) until it finds **strictly positive** distance, matching the textbook rule “if denominator is zero, take the next neighbour”. If none exist, it falls back to machine epsilon and a last index so the ratio remains defined.
-
-5. **New coordinate for \(i\) and for its NN.**  
-   - `next_coordinate = data[m*tau : N_valid + m*tau]` → \(x(i+m\tau)\) aligned with row index \(i\).  
-   - `nn_next_coordinate = data[nn_index + m*tau]` → the same scalar for the neighbour row.  
-   - `abs_diff_new = np.abs(next_coordinate - nn_next_coordinate)`.
-
-6. **`distance_m_plus_1`** as above; then **`a_i = distance_m_plus_1 / nn_distance`** with `np.errstate` and a finite guard.
-
-7. **Aggregates.**  
-   - **`E_m`** = `np.mean(a_i)` → \(E(m)\) in Cao’s notation.  
-   - **`E_star_m`** = `np.mean(abs_diff_new)` → \(E^*(m)\): mean absolute separation on the new axis only (the quantity that drives \(E_2\)).
-
-### Assembly: `cao_method_parallel`
-
-- **`m_values = range(1, d_max + 2)`** so that \(E(m)\) and \(E^*(m)\) are available for **\(m = 1,\ldots,d_{\max}+1\)**. That is required because \(E_1(m)\) pairs \(E(m{+}1)\) with \(E(m)\) up to \(m = d_{\max}\).
-
-- Workers run **`calculate_for_m`** in parallel (`multiprocessing.Pool`, `imap_unordered`). Results are stored in arrays `E` and `E_star` of length **`d_max + 2`**, with Python indices **`1 … d_max+1`** carrying the physics dimension label \(m\).
-
-- For **`m` in `1 … d_max`**:  
-  - `E1[m] = E[m+1] / E[m]` when both are positive.  
-  - `E2[m] = E_star[m+1] / E_star[m]` when both are positive.
-
-- **Return value:** `E1[1:], E2[1:]` drops the unused slot at index `0`. Plot axes use **`m = 1, …, d_max`**; array entry **`E1[k-1]`** corresponds to textbook **`E1(m)`** at **`m = k`**.
-
-### Heuristic post-processing (`if __name__ == "__main__"` only)
-
-These lines are **not** part of Cao’s published definitions; they summarize curves for the text report and `_cao_summary.txt`:
-
-- **`m_optimal`:** first \(m\) such that consecutive **`E1`** values change by less than **5%** **and** **`E1 > 0.85`** (saturation-style rule).
-
-- **Verdict from `E2`:** if every finite **`E2`** satisfies \(|E_2 - 1| < 0.05\), label **noise-like**; otherwise **deterministic-leaning** (compare white noise, where \(E_2 \approx 1\) across \(m\)).
+Returned arrays to plotting are `E1[1:], E2[1:]` indexed by `m = 1..d_max`.
 
 ### Parallelism
 
-- Default **`num_processes = mp.cpu_count()`**.  
-- **`NearestNeighbors(..., n_jobs=1)`** inside **`calculate_for_m`** avoids nested parallelism inside pool workers.
+- `multiprocessing.Pool`; default `num_processes = mp.cpu_count()`.
+- Inside workers, `NearestNeighbors` uses `n_jobs=1` to avoid nested parallelism warnings.
 
 ### Parameters (defaults)
 
-- **`d_max = 20`** → plotted dimensions **`m = 1 … 20`** (internally **`m+1`** is computed for ratios).  
-- Per-symbol **`(file, tau)`** in **`file_settings`** (checked-in defaults: BTC/ETH/ADA \(\tau=2\), XRP/DOGE \(\tau=3\), LTC/LINK \(\tau=4\)).
+- `d_max = 20` → dimensions `m = 1 .. 20` on plots (internally needs `m+1` for ratios).
+- Per-symbol `(file, tau)` in `file_settings` (BTC/ETH τ=2, LTC/LINK τ=4, XRP/DOGE τ=3, ADA τ=2 in the checked-in list).
 
 ### Outputs
 
@@ -652,6 +619,7 @@ py -3 C:\DCh\cao_.py
 Customize `file_settings`, `d_max`, or `num_processes` in the `__main__` section.
 
 ---
+
 ## Diagnostics: Capacity Dimension (`2dc.py`)
 
 **Pure NumPy / SciPy** capacity dimension estimate on Takens sets — **no** `boxcount.exe`.
@@ -957,6 +925,7 @@ Expected binary:
 ---
 
 ## Troubleshooting
+
 
 ### Python launcher issues
 

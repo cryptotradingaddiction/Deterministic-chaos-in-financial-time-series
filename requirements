@@ -1,24 +1,41 @@
 # Project requirements
 #
-# Install Python packages with:
+# Install:
 #   py -3 -m pip install -r requirements
 #
-# NOTE: TISEAN and gnuplot are system tools, not pip packages.
-# You must install them manually:
-#   - TISEAN (required): https://www.pks.mpg.de/tisean/
-#   - gnuplot (required for plots): http://www.gnuplot.info/
+# Python: 3.10+ recommended (tested with 3.12).
 #
-# Expected Windows paths in this project:
+# NOTE: TISEAN and gnuplot are system tools, not pip packages.
+# Install manually:
+#   - TISEAN: https://www.pks.mpg.de/tisean/
+#   - gnuplot (plots): http://www.gnuplot.info/
+#
+# Typical Windows paths in this project:
 #   - TISEAN: C:\DCh\Tisean_3.0.0\bin
 #   - gnuplot: C:\Program Files\gnuplot\bin\gnuplot.exe
 
-numpy
-scipy
-pandas
-matplotlib
-ccxt
-pyrqa
-nolds
-scikit-learn
-PyYAML
-PySide6
+# --- Core numerics & tables ---
+numpy>=2.0,<3
+scipy>=1.11,<2
+pandas>=2.0,<3
+
+# --- Plotting ---
+matplotlib>=3.8,<4
+
+# --- Machine learning (e.g. Cao KD-tree neighbours) ---
+scikit-learn>=1.3,<2
+
+# --- Exchange data ---
+ccxt>=4.0,<5
+
+# --- Recurrence analysis ---
+pyrqa>=8.0,<9
+
+# --- Nonlinear dynamics metrics ---
+nolds>=0.5,<1
+
+# --- Configuration ---
+PyYAML>=6.0,<7
+
+# --- Desktop GUI (optional; omit if you only use CLI / batch) ---
+PySide6>=6.5,<7

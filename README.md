@@ -8,7 +8,7 @@ This project combines:
 - log-return preprocessing,
 - invariant estimation via TISEAN,
 - recurrence quantification via `PyRQA`,
-- statistical surrogate testing with block permutation, **empirical rank-based p-values** (surrogate literature style), and decision rule (`p < 0.05`).
+- statistical surrogate testing with block permutation, **empirical rank-based p-values** (surrogate literature style), and decision rule (`p < 0.01` by default; see `--alpha`).
 
 ---
 
@@ -21,6 +21,7 @@ This project combines:
 - [End-to-End Workflow](#end-to-end-workflow)
 - [Distributed Hypothesis Workflow](#distributed-hypothesis-workflow)
 - [Statistical Model (Current, Supervisor-Aligned)](#statistical-model-current-supervisor-aligned)
+- [Minimum p-value vs `B` (large `z_sigma`, still “fail to reject”)](#minimum-p-value-vs-b-large-z_sigma-still-fail-to-reject)
 - [Outputs and Folder Structure](#outputs-and-folder-structure)
 - [How to Read Surrogate Results](#how-to-read-surrogate-results)
 - [Per-Coin Configuration](#per-coin-configuration)
@@ -71,7 +72,7 @@ The hypothesis part is distributed across per-invariant batch scripts and consol
 - Surrogates: **block permutation surrogates** (not point-wise shuffle).
 - **Inference:** empirical **p-values from ranks/counts** over `B` surrogate metric draws (no Gaussian / Student‑t assumption on the surrogate distribution).
 - **Descriptive only:** `z_sigma = (X_orig - mu_surr) / SD(surr)` (Theiler-style sigma score) and `z_SE = (X_orig - mu_surr) / SE_surr` with `SE_surr = SD(surr)/sqrt(B)` — **they do not define p** (note `z_SE` scales with `B`).
-- Decision rule: reject `H0` if `p-value < 0.05`.
+- Decision rule: reject `H0` if `p-value < alpha` (default **`alpha = 0.01`** in `hypothesis.py`; override with `--alpha`).
 
 ---
 
@@ -323,7 +324,7 @@ Each invariant family has different output files, parameterization, and practica
 - `correlation_dimension.bat` -> `hypothesis.py --metrics_list D2`
 - `correlation_entropy.bat` -> `hypothesis.py --metrics_list K2`
 - `Lambda_max.bat` -> `hypothesis.py --metrics_list LLE`
-- `RQA.bat` -> `hypothesis.py --metrics_list RR,DET,LAM,MAXLINE,ENTR,TT`
+- `RQA.bat` -> `hypothesis.py --metrics_list RR,DET,LAM,MAXLINE,ENTR,TT --rqa_radius <RAD_RQA_<sym>>`
 
 ### Wrapper behavior
 
@@ -371,9 +372,9 @@ z_sigma = (X_orig - mu_surr) / SD(surr)     # Theiler-style; comparable across B
 z_SE    = (X_orig - mu_surr) / SE_surr     # SE_surr = SD(surr)/sqrt(B); depends on B
 ```
 
-Decision (default): if empirical `p < 0.05` -> reject `H0`; else fail to reject `H0`.
+Decision (default): if empirical `p < alpha` -> reject `H0` (default **`alpha = 0.01`**); else fail to reject `H0`. Set e.g. `--alpha 0.05` if you want the older 5% convention.
 
-Optional **`--decision_abs_z_sigma K`** (e.g. `3`): the **`decision` column** uses **`|z_sigma| ≥ K`** instead of the p-value threshold; **p-values in the file are still empirical** (useful if you want a fixed “Kσ” rule for the thesis while keeping rank-based p for reporting).
+Optional **`--decision_abs_z_sigma K`** (e.g. `3`): the **`decision` column** uses **`|z_sigma| ≥ K`** instead of the p-value threshold; **p-values in the file are still empirical**.
 
 `d2.exe` runs inside `hypothesis.py` with **`-M1,3`**, matching `EMBED=1,3` in `correlation_dimension.bat` / `correlation_entropy.bat`.
 
@@ -381,7 +382,23 @@ Summary files report `SD(surr)`, `z_sigma`, `z_SE` with **explicit B in the colu
 
 ### Replicate count
 
-In `hypothesis.py`, surrogate replicate count **`B`** is **100** in both modes (`TEST_B` and `FULL_B` are both `100`). Test vs full mode mainly affects **series length** (2000 vs complete), not `B`. To change block structure or replicate count for experiments, use CLI flags (see `py -3 C:\DCh\hypothesis.py --help`): e.g. **`--surrogate_blocks`** (default `100` contiguous blocks per surrogate).
+In `hypothesis.py`, surrogate replicate count **`B`** is **100** in both modes (`TEST_B` and `FULL_B` are both `100`). Test vs full mode mainly affects **series length** (2000 vs complete), not **`B`**. There is **no CLI flag for `B`** yet — raise **`TEST_B`** / **`FULL_B`** in source if you need more surrogates.
+
+**Block structure** (how each surrogate series is built) is separate from **`B`**: override **`--surrogate_blocks`** (default `100` contiguous blocks per surrogate); see `py -3 C:\DCh\hypothesis.py --help`.
+
+<a id="minimum-p-value-vs-b-large-z_sigma-still-fail-to-reject"></a>
+
+### Minimum p-value vs `B` (large `z_sigma`, still “fail to reject”)
+
+With the **two-sided** empirical p-value and the **`(B+1)`** correction documented above, the **smallest** attainable p-value is **on the order of `2 / (B + 1)`** when the original ranks at the most extreme positions in **both** tails. For the default **`B = 100`**, that floor is **`2 / 101 ≈ 0.0198`**.
+
+Implications:
+
+- At the default decision rule **`alpha = 0.01`**, you **cannot** reject **`H0`** when **`p` is stuck at that floor — **`0.0198 > 0.01`** — even if the original is as extreme as the ranking allows. The **`decision`** column is driven by **`p < alpha`**, not by the magnitude of **`z_sigma`** (unless you use **`--decision_abs_z_sigma`**).
+- **`z_sigma`** can still be **very large**: it divides by **`SD(surr)`**, which may be tiny if surrogate values are tightly clustered. That does **not** automatically imply **`p < 0.01`** with **`B = 100`**.
+- Column **`rej_all`** in `print_results.py boot_aggregate` stays **`NO`** if **any** metric in scope fails to reject (e.g. **`MAXLINE`** often has **`p = 1`** when the original equals the surrogate cloud under the chosen embedding).
+
+**What to do:** increase **`B`** (edit **`TEST_B`** / **`FULL_B`** in `hypothesis.py`) into the **hundreds or low thousands** if you need **`p`-values that can fall below 0.01**, or temporarily use **`--alpha 0.05`** if a **5%** threshold matches your reporting convention.
 
 ---
 
@@ -425,23 +442,27 @@ No active `_bootstrap_summary.txt` naming should be used.
 
 In each `<BASE>_surrogate_summary.txt`, key columns are:
 
-- `Orig.` - metric value on original data,
+- `orig_mean` - metric value on the original series (compact aggregate tables use headers like `D2_orig_mean`),
+- `std_orig` - sample SD of ordinates in the **same plateau window** used for `orig_mean` (**D2**/**K2** only; **`nan`** for **LLE** and **RQA** scalars),
 - `Mean(surr)` - average across surrogates,
 - `SD(surr)` - sample SD across surrogates,
-- `z_sigma` - `(Orig. − Mean(surr)) / SD(surr)` (Theiler-style; descriptive),
-- `z_SE(B=<run>)` - column header prints the actual replicate count (e.g. `z_SE(B=100)`). Statistic: `(Orig. − Mean(surr)) / SE(surr)` with `SE = SD/√B` (descriptive; **not comparable across different B** without rescaling),
+- `SE(surr)` - **standard error of** `Mean(surr)`: `SD(surr) / √B` (same quantity as the denominator of `z_SE` when `z_SE = (orig_mean − Mean(surr)) / SE(surr)`),
+- `z_sigma` - `(orig_mean − Mean(surr)) / SD(surr)` (Theiler-style; descriptive),
+- `z_SE(B=<run>)` - column header prints the actual replicate count (e.g. `z_SE(B=100)`). Statistic: `(orig_mean − Mean(surr)) / SE(surr)` with `SE(surr) = SD(surr)/√B` (descriptive; **not comparable across different B** without rescaling),
 - `p-value` - **empirical** p-value from surrogate rank counts (see [Statistical Model](#statistical-model-current-supervisor-aligned)),
 - `decision` - per-metric `reject H0` / `fail to reject H0` (and `insufficient data` if applicable).
 
 Interpretation:
 
-- `p-value < 0.05`: reject `H0` for that metric,
-- `p-value >= 0.05`: fail to reject `H0`,
+- `p-value < alpha` (default **0.01**): reject `H0` for that metric,
+- otherwise: fail to reject `H0`,
 - `nan` / `insufficient data`: insufficient stable values.
 
-When aggregate scripts evaluate global chaos verdict:
+When ``print_results.py boot_aggregate`` builds the compact table, column **`rej_all`** is **YES** only if **every metric present** in that summary rejects `H0` at the run alpha (default **0.01**):
 
-- full YES verdict generally requires all core metrics (`D2`, `K2`, `LLE`) to pass rejection criterion in scope-aware aggregation.
+- **DKL scope** (summary includes ``D2``, ``K2``, ``LLE``): YES iff all three reject.
+- **RQA-only scope** (metrics are only ``RR``, ``DET``, …): YES iff each listed RQA metric rejects.
+- Otherwise **`—`**. PyRQA rows show **`—`** in **`std_orig`** (single scalar per series; no plateau SD).
 
 ---
 
@@ -471,7 +492,7 @@ Operational notes:
 
 - `crypto_data_all.py` - download market data.
 - `compute_logreturns.py` - build log-return datasets.
-- `hypothesis.py` - surrogate generation + metric recomputation + score + p-value inference.
+- `hypothesis.py` - surrogate generation + metric recomputation + `z_sigma` + p-value inference.
 - `print_results.py` - parse/print/aggregate outputs and surrogate summaries.
 
 ### Batch orchestrators
@@ -909,7 +930,7 @@ Batch runs `lyap_k.exe` + LLE hypothesis. `predictability.py` is a separate auxi
 
 Batch runs `recurr.exe`, then `rqa_values.py`, then RQA hypothesis.
 
-`rqa_values.py` reads **`TAU_RQA_<sym>`**, **`RAD_RQA_<sym>`**, and **`W_D2_<sym>`** (Theiler window, same as `hypothesis.py`) from `Tisean_3.0.0\bin\_per_coin_settings.bat` via `config_loader.parse_per_coin_settings_bat` / `rqa_params_for_symbol`. Embedding dimension is fixed at **m = 3** (matches `RQA.bat` `EMBED_DIM` and `hypothesis.py`). Series length follows **`DCH_TEST_MODE`**: first **2000** points in test mode, full series otherwise.
+`rqa_values.py` reads **`TAU_RQA_<sym>`**, **`RAD_RQA_<sym>`**, and **`W_D2_<sym>`** (Theiler window, same as `hypothesis.py`) from `Tisean_3.0.0\bin\_per_coin_settings.bat` via `config_loader.parse_per_coin_settings_bat` / `rqa_params_for_symbol`. **`hypothesis.py`** receives the same **`tau`**, **`W`**, and recurrence radius via **`--delay`**, **`--theiler`**, and **`--rqa_radius`** (wired from `RQA.bat` so PyRQA matches **`recurr.exe -r`** per coin). Embedding dimension is fixed at **m = 3** (matches `RQA.bat` `EMBED_DIM` and `hypothesis.py`). Series length follows **`DCH_TEST_MODE`**: first **2000** points in test mode, full series otherwise.
 
 ### `print_results.py`
 
@@ -991,8 +1012,11 @@ py -3 C:\DCh\hypothesis.py ^
   --theiler 0 ^
   --output_dir C:\DCh\data\results\correlation_dimension_full\BTCUSD_run2_tau2_W0\hypothesis_d2 ^
   --test_mode false ^
-  --metrics_list D2
+  --metrics_list D2 ^
+  --alpha 0.01
 ```
+
+(`--alpha` defaults to `0.01` if omitted; use e.g. `0.05` for the 5% convention.)
 
 ---
 
@@ -1002,6 +1026,7 @@ The following are not part of active execution flow:
 
 - `information_dimension.bat` (removed),
 - `kolmogorov_entropy.bat` (removed),
+- `surr_norm.py` (removed; surrogate workflow uses `surrogate_sampling.py` only),
 - run1 branches in active invariant `.bat` scripts.
 
 Historical mentions may remain in methodology context, but operationally the project is run2-only distributed workflow.

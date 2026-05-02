@@ -107,9 +107,9 @@ def parse_kantz_first_block_for_dim(path: str, target_dim: int):
 # =====================================================================
 
 SETTINGS_BY_SYMBOL = {
-    "BTCUSD": {"m": 4, "tau": 2},
-    "ETHUSD": {"m": 4, "tau": 2},
-    "LTCUSD": {"m": 4, "tau": 4},
+    "BTCUSD": {"m": 4, "tau": 3},
+    "ETHUSD": {"m": 4, "tau": 4},
+    "LTCUSD": {"m": 4, "tau": 3},
     "XRPUSD": {"m": 4, "tau": 3},
     "LINKUSD": {"m": 4, "tau": 4},
     "DOGEUSD": {"m": 4, "tau": 3},

@@ -41,7 +41,7 @@ if /i "%TEST_MODE%"=="true" (
 )
 
 echo [INFO] Output root : %OUT_ROOT%
-echo [INFO] m setting   : %EMBED% (components,max_embed -> using m=3 block)
+echo [INFO] m setting   : %EMBED% (d2 -M; gnuplot uses last block index 8)
 echo [INFO] Per-coin run:
 echo [INFO]   run2 = per-symbol (TAU_D2_^<sym^>, W_D2_^<sym^>)
 

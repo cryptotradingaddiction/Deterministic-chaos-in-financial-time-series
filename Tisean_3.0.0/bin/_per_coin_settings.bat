@@ -26,9 +26,9 @@ REM Tip: keep values explicit for every symbol to avoid implicit fallbacks.
 REM ============================================================================
 
 REM ---- D2 + K2 + Takens (all run via the same d2.exe pipeline) --------------
-set TAU_D2_BTCUSD=2
-set TAU_D2_ETHUSD=2
-set TAU_D2_LTCUSD=4
+set TAU_D2_BTCUSD=3
+set TAU_D2_ETHUSD=4
+set TAU_D2_LTCUSD=3
 set TAU_D2_XRPUSD=3
 set TAU_D2_LINKUSD=4
 set TAU_D2_DOGEUSD=3
@@ -43,18 +43,18 @@ set W_D2_DOGEUSD=0
 set W_D2_ADAUSD=0
 
 REM ---- Largest Lyapunov exponent (lyap_k) -----------------------------------
-set TAU_LLE_BTCUSD=2
-set TAU_LLE_ETHUSD=2
-set TAU_LLE_LTCUSD=4
+set TAU_LLE_BTCUSD=3
+set TAU_LLE_ETHUSD=4
+set TAU_LLE_LTCUSD=3
 set TAU_LLE_XRPUSD=3
 set TAU_LLE_LINKUSD=4
 set TAU_LLE_DOGEUSD=3
 set TAU_LLE_ADAUSD=2
 
 REM ---- RQA (recurr) - tau and recurrence threshold radius -------------------
-set TAU_RQA_BTCUSD=2
-set TAU_RQA_ETHUSD=2
-set TAU_RQA_LTCUSD=4
+set TAU_RQA_BTCUSD=3
+set TAU_RQA_ETHUSD=4
+set TAU_RQA_LTCUSD=3
 set TAU_RQA_XRPUSD=3
 set TAU_RQA_LINKUSD=4
 set TAU_RQA_DOGEUSD=3

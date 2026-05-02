@@ -1,4 +1,20 @@
 #!/usr/bin/env python3
+"""
+Permutation-surrogate hypothesis testing for dynamical invariants (D2, K2, LLE, RQA).
+
+Workflow:
+    1. Block-shuffle the observed series B times to obtain surrogate time series of the
+       same length (see ``surrogate_sampling.generate_permuted_samples``).
+    2. For each replicate, run the same metric pipeline as for the original data
+       (TISEAN ``d2``/``h2``, ``lyap_k``, PyRQA) inside ``process_single_bootstrap``.
+    3. Compare each original scalar metric to the empirical distribution of surrogate
+       values using rank-based p-values (+1/(B+1) correction) and tail rules in
+       ``METRIC_EMPIRICAL_TAIL``. ``z_sigma`` / ``z_SE`` are descriptive Theiler-style
+       summaries; significance defaults to empirical p < alpha (see ``--alpha``).
+
+Heavy lifting is parallelised with ``ProcessPoolExecutor`` because each replicate runs
+external binaries and/or PyRQA.
+"""
 import argparse
 import concurrent.futures
 import glob
@@ -23,12 +39,19 @@ from surrogate_sampling import generate_permuted_samples, load_series_1d
 
 logger = logging.getLogger(__name__)
 
+# Surrogate replicate count: kept equal for TEST vs FULL here; series length differs via CLI/test_mode instead.
 FULL_B = 100
 TEST_B = 100
+# Default significance level for empirical p-value decisions (reject H0 if p < ALPHA).
+DEFAULT_ALPHA = 0.01
 # Must match `EMBED` max in `correlation_dimension.bat` / `correlation_entropy.bat` (`-M1,3` → m≤3).
 M_D2 = 3
+# lyap_k forward horizon (embedding trajectory length cap); large enough for stable slope estimate.
 M_LYAP = 100
-R_RECURR = 0.01
+# Default PyRQA recurrence radius (same units as the embedded scalar series). Override with ``--rqa_radius``
+# so surrogate tests match ``RAD_RQA_<sym>`` / ``recurr.exe -r`` in ``RQA.bat``.
+DEFAULT_RQA_RADIUS = 0.01
+# Takens delay embedding dimension for RQA (must stay aligned with ``RQA.bat`` / thesis settings).
 RQA_EMBEDDING_DIM = 3
 
 RQA_KEYS = ("RR", "DET", "LAM", "MAXLINE", "ENTR", "TT")
@@ -44,6 +67,7 @@ def metric_names_for_scope(_metrics_scope=None):
 
 
 def parse_metrics_list(raw_metrics):
+    """Normalise ``--metrics_list`` input: uppercase tokens, dedupe, validate against ``ALL_METRICS``."""
     tokens = [t.strip().upper() for t in str(raw_metrics).split(",") if t.strip()]
     if not tokens:
         raise ValueError("metrics list is empty")
@@ -60,6 +84,7 @@ PRED_TOLERANCE = 1e-2
 
 
 def is_test_mode(value):
+    """Truthy strings for ``--test_mode`` (typically truncates series length in calling batches)."""
     return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
@@ -68,6 +93,7 @@ def load_data(filename):
 
 
 def resolve_tool(tool_name):
+    """Resolve a TISEAN executable: ``TISEAN_BIN`` env, repo ``Tisean_3.0.0/bin``, then PATH."""
     from_env = os.environ.get("TISEAN_BIN")
     if from_env:
         candidate = os.path.join(from_env, f"{tool_name}.exe")
@@ -86,6 +112,7 @@ def resolve_tool(tool_name):
 
 
 def run_d2(data_file, delay, theiler, output_prefix):
+    """Grassberger–Procaccia correlation integral; writes ``<prefix>.d2`` and ``.h2``."""
     cmd = [
         resolve_tool("d2"),
         f"-d{delay}",
@@ -110,6 +137,7 @@ def run_c2t(c2_file, output_file):
 
 
 def run_lyap_k(data_file, delay, output_file):
+    """Kantz algorithm largest Lyapunov exponent; neighbourhood bracket fixed for log-return scale."""
     cmd = [
         resolve_tool("lyap_k"),
         f"-d{delay}",
@@ -168,6 +196,7 @@ def run_boxcount(data_file, delay, output_file):
     try:
         subprocess.run(primary, check=True, capture_output=True, text=True)
     except subprocess.CalledProcessError:
+        # Older TISEAN builds accept ``-M1,max`` instead of single-index ``-Mmax``.
         fallback = [
             resolve_tool("boxcount"),
             f"-d{delay}",
@@ -181,37 +210,60 @@ def run_boxcount(data_file, delay, output_file):
         subprocess.run(fallback, check=True, capture_output=True, text=True)
 
 
-def extract_d2(d2_file):
+def extract_d2_mean_std(d2_file):
+    """Plateau-window mean and sample SD of local D2 slopes (same window as extract_d2 mean).
+
+    ``np.loadtxt`` collapses TISEAN comment blocks; column 1 holds local dimension slopes vs ln r.
+    The central 50% of points (25–75% index range) approximates a scaling plateau for reporting.
+    """
     try:
         data = np.loadtxt(d2_file)
         if data.size == 0 or data.ndim < 2:
-            return np.nan
+            return np.nan, np.nan
         slopes = data[:, 1]
         n = len(slopes)
         low, high = int(0.25 * n), int(0.75 * n)
         if low >= high:
-            return np.nan
-        return float(np.mean(slopes[low:high]))
+            return np.nan, np.nan
+        w = slopes[low:high]
+        mu = float(np.mean(w))
+        sg = float(np.std(w, ddof=1)) if len(w) > 1 else np.nan
+        return mu, sg
     except Exception:
-        return np.nan
+        return np.nan, np.nan
 
 
-def extract_k2(h2_file):
+def extract_d2(d2_file):
+    mu, _ = extract_d2_mean_std(d2_file)
+    return mu
+
+
+def extract_k2_mean_std(h2_file):
+    """Plateau-window mean and sample SD of K2 curve ordinates (same window as extract_k2 mean)."""
     try:
         data = np.loadtxt(h2_file)
         if data.size == 0 or data.ndim < 2:
-            return np.nan
+            return np.nan, np.nan
         k2_vals = data[:, 1]
         n = len(k2_vals)
         low, high = int(0.25 * n), int(0.75 * n)
         if low >= high:
-            return np.nan
-        return float(np.mean(k2_vals[low:high]))
+            return np.nan, np.nan
+        w = k2_vals[low:high]
+        mu = float(np.mean(w))
+        sg = float(np.std(w, ddof=1)) if len(w) > 1 else np.nan
+        return mu, sg
     except Exception:
-        return np.nan
+        return np.nan, np.nan
+
+
+def extract_k2(h2_file):
+    mu, _ = extract_k2_mean_std(h2_file)
+    return mu
 
 
 def extract_lle(lyap_file):
+    """Parse lyap_k text output: take the last epsilon block, linear fit on first ~20% of iterates."""
     try:
         with open(lyap_file, "r", encoding="utf-8", errors="ignore") as handle:
             lines = handle.readlines()
@@ -246,6 +298,7 @@ def extract_lle(lyap_file):
 
 
 def extract_middle_window_from_text(file_path, value_column_idx=1):
+    """Generic plateau reader: numeric column ``value_column_idx``, mean of middle 50% of rows."""
     values = []
     try:
         with open(file_path, "r", encoding="utf-8", errors="ignore") as handle:
@@ -279,13 +332,18 @@ def extract_k1(box_file):
     return extract_middle_window_from_text(box_file, value_column_idx=1)
 
 
-def compute_pyrqa_metrics(series, delay, theiler):
+def compute_pyrqa_metrics(series, delay, theiler, radius: float | None = None):
+    """Scalar RQA statistics via PyRQA (Classic RQA, Euclidean, fixed-radius neighbourhood).
+
+    ``radius`` must match the recurrence-scale used elsewhere (``recurr -r``, ``rqa_values.py``).
+    """
+    r_eff = float(DEFAULT_RQA_RADIUS if radius is None else radius)
     try:
         ts = TimeSeries(series, embedding_dimension=RQA_EMBEDDING_DIM, time_delay=delay)
         settings = Settings(
             ts,
             analysis_type=Classic,
-            neighbourhood=FixedRadius(R_RECURR),
+            neighbourhood=FixedRadius(r_eff),
             similarity_measure=EuclideanMetric,
             theiler_corrector=theiler,
         )
@@ -305,7 +363,15 @@ def compute_pyrqa_metrics(series, delay, theiler):
         return {k: np.nan for k in RQA_KEYS}
 
 
-def compute_original_invariants(orig_file, output_dir, base, delay, theiler, metric_names=None):
+def compute_original_invariants(
+    orig_file,
+    output_dir,
+    base,
+    delay,
+    theiler,
+    metric_names=None,
+    rqa_radius: float | None = None,
+):
     metric_names = list(ALL_METRICS) if not metric_names else list(metric_names)
     need_d2 = "D2" in metric_names
     need_k2 = "K2" in metric_names
@@ -314,28 +380,38 @@ def compute_original_invariants(orig_file, output_dir, base, delay, theiler, met
 
     prefix = os.path.join(output_dir, f"{base}_orig")
     out = {k: np.nan for k in metric_names}
+    out_std = {k: np.nan for k in metric_names}
     d2_file = h2_file = None
     if need_d2 or need_k2:
         d2_file, h2_file = run_d2(orig_file, delay, theiler, prefix)
     if need_d2 and d2_file:
-        out["D2"] = extract_d2(d2_file)
+        mu, sg = extract_d2_mean_std(d2_file)
+        out["D2"] = mu
+        out_std["D2"] = sg
     if need_k2 and h2_file:
-        out["K2"] = extract_k2(h2_file)
+        mu, sg = extract_k2_mean_std(h2_file)
+        out["K2"] = mu
+        out_std["K2"] = sg
     if need_lle:
         lyap_file = prefix + "_lyap.txt"
         run_lyap_k(orig_file, delay, lyap_file)
         out["LLE"] = extract_lle(lyap_file)
     if need_rqa:
         original_series = load_data(orig_file)
-        rqa_metrics = compute_pyrqa_metrics(original_series, delay, theiler)
+        rqa_metrics = compute_pyrqa_metrics(original_series, delay, theiler, rqa_radius)
         for k in RQA_KEYS:
             if k in out:
                 out[k] = rqa_metrics.get(k, np.nan)
-    return out
+    return out, out_std
 
 
 def process_single_bootstrap(args_tuple):
-    i, sample, tmp_dir, delay, theiler, metric_names = args_tuple
+    """Worker: materialise one surrogate sample as ``.dat``, run the metric stack, delete temps.
+
+    Must remain top-level for pickling under ``ProcessPoolExecutor``. Returns a dict with index ``i``
+    and one float per requested metric (NaNs on tool failure).
+    """
+    i, sample, tmp_dir, delay, theiler, metric_names, rqa_radius = args_tuple
     if not metric_names:
         metric_names = list(ALL_METRICS)
     need_d2 = "D2" in metric_names
@@ -359,7 +435,7 @@ def process_single_bootstrap(args_tuple):
             run_lyap_k(sample_file, delay, lyap_file)
             result["LLE"] = extract_lle(lyap_file)
         if need_rqa:
-            rqa_vals = compute_pyrqa_metrics(sample, delay, theiler)
+            rqa_vals = compute_pyrqa_metrics(sample, delay, theiler, rqa_radius)
             for k in RQA_KEYS:
                 if k in result:
                     result[k] = rqa_vals.get(k, np.nan)
@@ -386,10 +462,12 @@ def process_single_bootstrap(args_tuple):
 
 
 def safe_mean(arr):
+    """Mean of 1d array; NaN if empty (used for surrogate batch summaries in main)."""
     return float(np.mean(arr)) if len(arr) > 0 else np.nan
 
 
 def safe_std(arr):
+    """Sample SD (ddof=1) across surrogate replicates; aligns with table ``SD(surr)`` column."""
     return float(np.std(arr, ddof=1)) if len(arr) > 1 else (float(np.std(arr)) if len(arr) == 1 else np.nan)
 
 
@@ -413,7 +491,8 @@ def empirical_surrogate_test(
     boot_dist: np.ndarray,
     orig_val: float,
     tail: str,
-) -> tuple[float, float, float, str]:
+    alpha: float = DEFAULT_ALPHA,
+) -> tuple[float, float, float, str, float]:
     """
     Rank/count empirical p-value from B surrogate replicates (no Gaussian / t-assumption).
 
@@ -426,18 +505,23 @@ def empirical_surrogate_test(
 
     Descriptive (not used for p):
       z_sigma = (T_orig - mean(T)) / SD(T)  — sigma-score (Theiler-style).
-      z_se    = (T_orig - mean(T)) / SE(T) with SE = SD/sqrt(B) — sensitive to B; for comparison only.
+      SE(surr) = SD(T) / sqrt(B)  — standard error of Mean(surr) (same SD as z_sigma denominator).
+      z_se    = (T_orig - mean(T)) / SE(surr) — sensitive to B; for comparison only.
 
-    Decision: reject H0 if p < 0.05.
+    Decision: reject H0 if p < alpha (default alpha={DEFAULT_ALPHA}).
+
+    Returns (z_sigma, z_se, p_val, decision, SE_surr_mean).
     """
     bd = np.asarray(boot_dist, dtype=float)
     bd = bd[np.isfinite(bd)]
     b_reps = len(bd)
     if b_reps < 1 or not np.isfinite(orig_val):
-        return np.nan, np.nan, np.nan, "insufficient data"
+        return np.nan, np.nan, np.nan, "insufficient data", np.nan
 
     m = float(np.mean(bd))
+    # SD across surrogate *replicates* (not within-run curve noise); used for z_sigma denominator.
     sd = float(np.std(bd, ddof=1)) if b_reps > 1 else 0.0
+    # Standard error of the mean of surrogates: SD/sqrt(B); denominator for z_SE (not for p-value).
     se = sd / np.sqrt(b_reps) if b_reps > 0 else np.nan
 
     if sd > 0:
@@ -452,6 +536,7 @@ def empirical_surrogate_test(
     else:
         z_se = np.nan
 
+    # Empirical rank counts include equality (+1 in numerator and B+1 denominator avoids p=0).
     ge = int(np.sum(bd >= orig_val))
     le = int(np.sum(bd <= orig_val))
     p_upper = (1 + ge) / (b_reps + 1)
@@ -467,9 +552,9 @@ def empirical_surrogate_test(
         raise ValueError(f"unknown tail mode: {tail!r}")
 
     decision = (
-        "reject H0" if np.isfinite(p_val) and (p_val < 0.05) else "fail to reject H0"
+        "reject H0" if np.isfinite(p_val) and (p_val < alpha) else "fail to reject H0"
     )
-    return z_sigma, z_se, float(p_val), decision
+    return z_sigma, z_se, float(p_val), decision, float(se)
 
 
 def predictability_time(lle, eps=PRED_EPSILON, tol=PRED_TOLERANCE):
@@ -480,6 +565,7 @@ def predictability_time(lle, eps=PRED_EPSILON, tol=PRED_TOLERANCE):
 
 
 def main():
+    """CLI entry: build surrogates, compute metrics, write ``<base>_surrogate_summary.txt``, print table."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", required=True)
     parser.add_argument("--base", required=True)
@@ -505,16 +591,36 @@ def main():
         help="Number of contiguous blocks used for block-permutation surrogate generation (default 100).",
     )
     parser.add_argument(
+        "--alpha",
+        type=float,
+        default=DEFAULT_ALPHA,
+        help=f"Significance level for empirical p-value decisions (default {DEFAULT_ALPHA}: reject H0 if p < alpha).",
+    )
+    parser.add_argument(
         "--decision_abs_z_sigma",
         type=float,
         default=None,
         metavar="K",
         help=(
-            "If set (e.g. 3), reject H0 when |z_sigma|>=K instead of using empirical p<0.05. "
+            "If set (e.g. 3), reject H0 when |z_sigma|>=K instead of using empirical p < alpha. "
             "Does not override 'insufficient data'. p-values in the table are unchanged."
         ),
     )
+    parser.add_argument(
+        "--rqa_radius",
+        type=float,
+        default=DEFAULT_RQA_RADIUS,
+        metavar="R",
+        help=(
+            "PyRQA fixed recurrence radius (same as TISEAN recurr -r / RAD_RQA_<sym>). "
+            "Ignored unless RQA metrics are requested. Default: %(default)g."
+        ),
+    )
     args = parser.parse_args()
+    if not (0.0 < args.alpha < 1.0):
+        raise SystemExit("hypothesis.py: --alpha must be strictly between 0 and 1.")
+    if args.rqa_radius <= 0.0:
+        raise SystemExit("hypothesis.py: --rqa_radius must be positive.")
 
     logging.basicConfig(
         level=logging.INFO,
@@ -535,12 +641,17 @@ def main():
     _dec_msg = (
         f"decision by |z_sigma|>={args.decision_abs_z_sigma:g} (not p-threshold)"
         if args.decision_abs_z_sigma is not None
-        else "decision by empirical p<0.05"
+        else f"decision by empirical p<{args.alpha:g}"
+    )
+    _rqa_note = (
+        f" PyRQA r={args.rqa_radius:g}."
+        if any(k in metric_names for k in RQA_KEYS)
+        else ""
     )
     print(
         f"  -> Surrogates: block permutation (N_blocks={args.surrogate_blocks}); "
         "inference: empirical p from surrogate ranks (Theiler-style); "
-        f"z_sigma / z_SE(B={b_reps}) in table; {_dec_msg}."
+        f"z_sigma / z_SE(B={b_reps}) in table; {_dec_msg}.{_rqa_note}"
     )
 
     orig_data = load_data(args.input)
@@ -555,7 +666,10 @@ def main():
     boot = {name: np.full(b_reps, np.nan, dtype=float) for name in metric_names}
 
     print("  -> Launching parallel TISEAN + RQA execution...")
-    tasks = [(i, permuted_samples[i], tmp_dir, args.delay, args.theiler, metric_names) for i in range(b_reps)]
+    tasks = [
+        (i, permuted_samples[i], tmp_dir, args.delay, args.theiler, metric_names, args.rqa_radius)
+        for i in range(b_reps)
+    ]
     with concurrent.futures.ProcessPoolExecutor() as executor:
         for count, res in enumerate(executor.map(process_single_bootstrap, tasks), 1):
             idx = res["i"]
@@ -569,24 +683,37 @@ def main():
     except OSError:
         pass
 
+    # Original-series metrics (and plateau std_orig for D2/K2) for comparison to surrogate clouds.
     print("  -> Computing invariants for original data...")
-    orig = compute_original_invariants(
-        args.input, args.output_dir, args.base, args.delay, args.theiler, metric_names=metric_names
+    orig, orig_std = compute_original_invariants(
+        args.input,
+        args.output_dir,
+        args.base,
+        args.delay,
+        args.theiler,
+        metric_names=metric_names,
+        rqa_radius=args.rqa_radius,
     )
 
+    # Drop failed surrogate runs before p-values (finite values only).
     boot_clean = {k: arr[np.isfinite(arr)] for k, arr in boot.items()}
     z_sigma_scores: dict[str, float] = {}
     z_se_scores: dict[str, float] = {}
+    se_surr_scores: dict[str, float] = {}
     p_values = {}
     decisions = {}
     for k in metric_names:
         tail_k = METRIC_EMPIRICAL_TAIL.get(k, "two_sided")
-        zs, zse, p_val, dec = empirical_surrogate_test(boot_clean[k], orig[k], tail_k)
+        zs, zse, p_val, dec, se_surr = empirical_surrogate_test(
+            boot_clean[k], orig[k], tail_k, alpha=args.alpha
+        )
         z_sigma_scores[k] = zs
         z_se_scores[k] = zse
+        se_surr_scores[k] = se_surr
         p_values[k] = p_val
         decisions[k] = dec
 
+    # Optional override: replace p-value-based decision with a fixed |z_sigma| threshold (thesis convention).
     if args.decision_abs_z_sigma is not None:
         thr = float(args.decision_abs_z_sigma)
         for k in metric_names:
@@ -598,6 +725,7 @@ def main():
             elif np.isfinite(zs):
                 decisions[k] = "fail to reject H0"
 
+    # Predictability time from LLE is ancillary (hours); hypothesis on LLE remains in the main table above.
     lle_orig = orig.get("LLE", np.nan)
     T_orig = predictability_time(lle_orig)
     lle_boot = boot_clean.get("LLE", np.array([]))
@@ -614,18 +742,22 @@ def main():
         T_boot_hi = np.nan
         T_boot_n = 0
 
+    # Human-readable report + mirrored console block (table + conclusion); paths stable for ``print_results.py``.
     summary_file = os.path.join(args.output_dir, f"{args.base}_surrogate_summary.txt")
     with open(summary_file, "w", encoding="utf-8") as handle:
         handle.write(f"Permutation surrogate hypothesis test ({args.base})\n")
-        handle.write(
-            f"Parameters: tau={args.delay}, W={args.theiler}, B={b_reps}, metrics={metrics_label}, "
-            f"surrogate_blocks={args.surrogate_blocks}\n"
+        _param_line = (
+            f"tau={args.delay}, W={args.theiler}, B={b_reps}, metrics={metrics_label}, "
+            f"surrogate_blocks={args.surrogate_blocks}"
         )
+        if any(k in metric_names for k in RQA_KEYS):
+            _param_line += f", r_PyRQA={args.rqa_radius:g}"
+        handle.write(f"Parameters: {_param_line}\n")
         handle.write(f"Original data length: {n}\n")
         handle.write(f"Mode: {'TEST' if test_mode else 'FULL'}\n")
         handle.write("Surrogates: block permutation of observed series (contiguous blocks shuffled in random order).\n")
         _rule_p = (
-            "Reject H0 if p < 0.05 (empirical rank p-values)."
+            f"Reject H0 if p < {args.alpha:g} (empirical rank p-values)."
             if args.decision_abs_z_sigma is None
             else (
                 f"Reject H0 if |z_sigma| >= {args.decision_abs_z_sigma:g} "
@@ -635,39 +767,67 @@ def main():
         handle.write(
             "Inference : empirical p-values from surrogate counts (+1 / B+1 correction); "
             "tails: D2,K2=lower; LLE=upper; RQA=two_sided (see METRIC_EMPIRICAL_TAIL in hypothesis.py). "
-            "z_sigma = (orig-mean)/SD(surr) (Theiler-style); "
-            f"z_SE(B={b_reps}) = (orig-mean)/(SD/sqrt(B)) — descriptive. "
+            "std_orig = sample SD of curve ordinates in the same plateau window as orig_mean (D2/K2 only; else nan). "
+            "SE(surr) = SD(surr)/√B — standard error of Mean(surr); "
+            "z_sigma = (orig_mean−Mean(surr))/SD(surr) (Theiler-style); "
+            f"z_SE(B={b_reps}) = (orig_mean−Mean(surr))/SE(surr) — descriptive. "
             f"{_rule_p}\n\n"
         )
-        handle.write(
-            f"Invariant       Orig.    Mean(surr)  SD(surr)    z_sigma   z_SE(B={b_reps})    p-value    decision\n"
+        _hdr = (
+            f"Invariant    orig_mean   std_orig  Mean(surr)  SD(surr)   SE(surr)    "
+            f"z_sigma   z_SE(B={b_reps})    p-value    decision"
         )
-        handle.write(
-            "--------------------------------------------------------------------------------------------------------\n"
-        )
+        handle.write(_hdr + "\n")
+        handle.write("-" * len(_hdr) + "\n")
 
+        # Fixed-width column helpers so console and file tables stay aligned with ``_hdr``.
         def _fmt_zcol(z: float) -> str:
             if np.isnan(z):
                 return "      nan"
             return f"{z:>10.4f}"
 
+        def _fmt_os(x: float) -> str:
+            if np.isnan(x):
+                return "      nan"
+            return f"{x:>9.4f}"
+
+        def _fmt_se_col(x: float) -> str:
+            if np.isnan(x):
+                return "      nan"
+            return f"{x:>9.4f}"
+
+        print("\n  --- Surrogate summary table (also saved to file) ---")
+        print(f"  {_hdr}")
+        print(f"  {'-' * len(_hdr)}")
         for metric in metric_names:
             bd = boot_clean[metric]
             mn = safe_mean(bd)
             sdb = safe_std(bd)
             zs = z_sigma_scores[metric]
             zse = z_se_scores[metric]
+            ses = se_surr_scores.get(metric, np.nan)
             pv = p_values[metric]
             ssig = _fmt_zcol(zs)
             sse = _fmt_zcol(zse)
-            pp = f"{pv:>10.4e}" if np.isfinite(pv) else "      nan"
-            handle.write(
-                f"{metric:<14} {orig[metric]:>8.4f}  {mn:>10.4f}  {sdb:>10.4f}  {ssig}  {sse}  {pp}  "
-                f"{decisions[metric]}\n"
+            pp = f"{pv:>10.4f}" if np.isfinite(pv) else "      nan"
+            so = _fmt_os(orig_std.get(metric, np.nan))
+            se_cell = _fmt_se_col(ses)
+            row = (
+                f"{metric:<14} {orig[metric]:>8.4f}  {so}  {mn:>10.4f}  {sdb:>10.4f}  {se_cell}  {ssig}  {sse}  {pp}  "
+                f"{decisions[metric]}"
             )
-        handle.write("\nConclusion (decision by p-value < 0.05):\n")
+            handle.write(row + "\n")
+            print(f"  {row}")
+        if args.decision_abs_z_sigma is None:
+            _cl = f"\nConclusion (decision by empirical p < {args.alpha:g}):\n"
+        else:
+            _cl = f"\nConclusion (decision by |z_sigma| >= {args.decision_abs_z_sigma:g}):\n"
+        handle.write(_cl)
+        print(_cl.rstrip())
         for metric in metric_names:
-            handle.write(f"  {metric:<8}: {decisions[metric]}\n")
+            _ln = f"  {metric:<8}: {decisions[metric]}\n"
+            handle.write(_ln)
+            print(_ln.rstrip())
 
         if "LLE" in metric_names:
             handle.write("\nPredictability time T (hours)\n")

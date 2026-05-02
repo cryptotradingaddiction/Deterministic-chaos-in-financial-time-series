@@ -264,7 +264,7 @@ def _parse_bootstrap_summary(path):
         "B": "",
         "n": "",
         "mode": "",
-        "metrics": {},          # name -> dict(orig, mean, std, score, pvalue)
+        "metrics": {},          # orig, std_orig, mean, std, se_surr, z_sigma, pvalue; legacy 'score' = z_sigma
         "conclusion": {},       # name -> "reject H0" / "fail to reject H0" / "insufficient data"
         "T_original": "",
         "T_bootstrap": "",
@@ -297,7 +297,27 @@ def _parse_bootstrap_summary(path):
     if m:
         info["mode"] = m.group(1)
 
-    # hypothesis.py v3: Orig Mean SD z_sigma z_SE p-value decision
+    use_std_orig_row = bool(re.search(r"Invariant\s+orig_mean\s+std_orig", text))
+    use_se_surr_col = bool(re.search(r"SD\(surr\)\s+SE\(surr\)", text))
+
+    # hypothesis.py v5: ... SD(surr) SE(surr) z_sigma z_SE p-value decision
+    row_re_empirical_z_std_se = re.compile(
+        r"^(?P<name>\S+)\s+(?P<orig>-?(?:nan|inf|\d+\.\d+))\s+(?P<std_orig>-?(?:nan|inf|\d+\.\d+))\s+"
+        r"(?P<mean>-?(?:nan|inf|\d+\.\d+))\s+(?P<std>-?(?:nan|inf|\d+\.\d+))\s+"
+        r"(?P<se_surr>-?(?:nan|inf|\d+\.\d+))\s+"
+        r"(?P<z_sigma>-?(?:nan|inf|\d+\.\d+))\s+(?P<z_se>-?(?:nan|inf|\d+\.\d+))\s+"
+        r"(?P<pvalue>-?(?:nan|inf|\d*\.?\d+(?:[eE][+-]?\d+)?))\s+"
+        r"(?P<decision>reject H0|fail to reject H0|insufficient data)\s*$"
+    )
+    # hypothesis.py v4: orig_mean std_orig Mean(surr) SD(surr) z_sigma z_SE p-value decision
+    row_re_empirical_z_std = re.compile(
+        r"^(?P<name>\S+)\s+(?P<orig>-?(?:nan|inf|\d+\.\d+))\s+(?P<std_orig>-?(?:nan|inf|\d+\.\d+))\s+"
+        r"(?P<mean>-?(?:nan|inf|\d+\.\d+))\s+(?P<std>-?(?:nan|inf|\d+\.\d+))\s+"
+        r"(?P<z_sigma>-?(?:nan|inf|\d+\.\d+))\s+(?P<z_se>-?(?:nan|inf|\d+\.\d+))\s+"
+        r"(?P<pvalue>-?(?:nan|inf|\d*\.?\d+(?:[eE][+-]?\d+)?))\s+"
+        r"(?P<decision>reject H0|fail to reject H0|insufficient data)\s*$"
+    )
+    # hypothesis.py v3 (no std_orig column)
     row_re_empirical_z = re.compile(
         r"^(?P<name>\S+)\s+(?P<orig>-?(?:nan|inf|\d+\.\d+))\s+(?P<mean>-?(?:nan|inf|\d+\.\d+))\s+"
         r"(?P<std>-?(?:nan|inf|\d+\.\d+))\s+(?P<z_sigma>-?(?:nan|inf|\d+\.\d+))\s+"
@@ -336,8 +356,80 @@ def _parse_bootstrap_summary(path):
             return float("-inf")
         return float(s)
 
+    def _fill_metric_row(info, name, orig, std_orig, mean, std, se_surr, zs, zse, pvalue, decision):
+        info["metrics"][name] = {
+            "orig": orig,
+            "std_orig": std_orig,
+            "mean": mean,
+            "std": std,
+            "se_surr": se_surr,
+            "z_sigma": zs,
+            "z_se": zse,
+            "score": zs,
+            "pvalue": pvalue,
+        }
+        info["conclusion"][name] = decision
+
     for line in text.splitlines():
         line_st = line.strip()
+        rm = row_re_empirical_z_std_se.match(line_st) if use_se_surr_col else None
+        if rm is not None and rm.group("name") in metric_names_row:
+            name = rm.group("name")
+            zs = _parse_float_tok(rm.group("z_sigma"))
+            zse = _parse_float_tok(rm.group("z_se"))
+            pv_raw = rm.group("pvalue")
+            if pv_raw == "nan":
+                pvalue = float("nan")
+            elif pv_raw in ("inf", "+inf"):
+                pvalue = float("inf")
+            elif pv_raw == "-inf":
+                pvalue = float("-inf")
+            else:
+                pvalue = float(pv_raw)
+            _fill_metric_row(
+                info,
+                name,
+                _parse_float_tok(rm.group("orig")),
+                _parse_float_tok(rm.group("std_orig")),
+                _parse_float_tok(rm.group("mean")),
+                _parse_float_tok(rm.group("std")),
+                _parse_float_tok(rm.group("se_surr")),
+                zs,
+                zse,
+                pvalue,
+                rm.group("decision"),
+            )
+            continue
+
+        rm = row_re_empirical_z_std.match(line_st) if use_std_orig_row else None
+        if rm is not None and rm.group("name") in metric_names_row:
+            name = rm.group("name")
+            zs = _parse_float_tok(rm.group("z_sigma"))
+            zse = _parse_float_tok(rm.group("z_se"))
+            pv_raw = rm.group("pvalue")
+            if pv_raw == "nan":
+                pvalue = float("nan")
+            elif pv_raw in ("inf", "+inf"):
+                pvalue = float("inf")
+            elif pv_raw == "-inf":
+                pvalue = float("-inf")
+            else:
+                pvalue = float(pv_raw)
+            _fill_metric_row(
+                info,
+                name,
+                _parse_float_tok(rm.group("orig")),
+                _parse_float_tok(rm.group("std_orig")),
+                _parse_float_tok(rm.group("mean")),
+                _parse_float_tok(rm.group("std")),
+                float("nan"),
+                zs,
+                zse,
+                pvalue,
+                rm.group("decision"),
+            )
+            continue
+
         rm = row_re_empirical_z.match(line_st)
         if rm is not None and rm.group("name") in metric_names_row:
             name = rm.group("name")
@@ -352,16 +444,19 @@ def _parse_bootstrap_summary(path):
                 pvalue = float("-inf")
             else:
                 pvalue = float(pv_raw)
-            info["metrics"][name] = {
-                "orig": _parse_float_tok(rm.group("orig")),
-                "mean": _parse_float_tok(rm.group("mean")),
-                "std": _parse_float_tok(rm.group("std")),
-                "z_sigma": zs,
-                "z_se": zse,
-                "score": zs,
-                "pvalue": pvalue,
-            }
-            info["conclusion"][name] = rm.group("decision")
+            _fill_metric_row(
+                info,
+                name,
+                _parse_float_tok(rm.group("orig")),
+                float("nan"),
+                _parse_float_tok(rm.group("mean")),
+                _parse_float_tok(rm.group("std")),
+                float("nan"),
+                zs,
+                zse,
+                pvalue,
+                rm.group("decision"),
+            )
             continue
 
         rm = row_re_new_no_sem.match(line_st)
@@ -376,11 +471,15 @@ def _parse_bootstrap_summary(path):
             if rm is None or rm.group("name") not in metric_names_row:
                 continue
             name = rm.group("name")
+            score = float(rm.group("score"))
             info["metrics"][name] = {
                 "orig": float(rm.group("orig")),
+                "std_orig": float("nan"),
                 "mean": float(rm.group("mean")),
                 "std": float(rm.group("std")),
-                "score": float(rm.group("score")),
+                "se_surr": float("nan"),
+                "z_sigma": score,
+                "score": score,
                 "pvalue": float("nan"),
             }
         else:
@@ -401,8 +500,11 @@ def _parse_bootstrap_summary(path):
                 pvalue = float(pv_raw)
             info["metrics"][name] = {
                 "orig": float(rm.group("orig")),
+                "std_orig": float("nan"),
                 "mean": float(rm.group("mean")),
                 "std": float(rm.group("std")),
+                "se_surr": float("nan"),
+                "z_sigma": score,
                 "score": score,
                 "pvalue": pvalue,
             }
@@ -444,6 +546,9 @@ def cmd_boot_aggregate(path, _n=None):
 
     out_path = os.path.join(path, "_hypothesis_aggregate_summary.txt")
     metric_order = ("D2", "K2", "LLE", "RR", "DET", "LAM", "MAXLINE", "ENTR", "TT")
+    # PyRQA scalar metrics: no plateau-window std_orig in hypothesis.py (column is absent / NaN in summaries).
+    RQA_METRICS = ("RR", "DET", "LAM", "MAXLINE", "ENTR", "TT")
+    DKL_METRICS = ("D2", "K2", "LLE")
     parsed_infos = []
     metrics_present = []
     for fp in found:
@@ -460,13 +565,14 @@ def cmd_boot_aggregate(path, _n=None):
         fh.write(f"Files found  : {len(found)}\n")
         fh.write("=" * 110 + "\n\n")
 
+        w_om = 13  # "{metric}_orig_mean" column (e.g. D2_orig_mean)
+        w_so = 10  # "{metric}_std_orig"
         header = f"{'Symbol':<8} {'tau':>4} {'W':>3} {'B':>5}"
         for name in metric_names:
-            if name == "LLE":
-                header += f" {'LLE_orig':>10} {'s_LLE':>7}"
-            else:
-                header += f" {f'{name}_orig':>9} {f's_{name}':>7}"
-        header += f" {'chaos':>7}"
+            header += (
+                f" {f'{name}_orig_mean':>{w_om}} {f'{name}_std_orig':>{w_so}} {f'z_{name}':>7}"
+            )
+        header += f" {'rej_all':>7}"
         fh.write(header + "\n")
         fh.write("-" * len(header) + "\n")
 
@@ -481,23 +587,44 @@ def cmd_boot_aggregate(path, _n=None):
             for name in metric_names:
                 m = info["metrics"].get(name)
                 if m is None:
-                    row += f" {'nan':>9} {'nan':>7}" if name != "LLE" else f" {'nan':>10} {'nan':>7}"
+                    row += f" {'nan':>{w_om}} {'nan':>{w_so}} {'nan':>7}"
                 else:
-                    if name == "LLE":
-                        row += f" {m['orig']:>10.4f} {m['score']:>7.4f}"
+                    zv = m.get("z_sigma", m.get("score", float("nan")))
+                    so = m.get("std_orig", float("nan"))
+                    # RQA metrics have no within-curve std_orig (single PyRQA scalar per series).
+                    if name in RQA_METRICS and not np.isfinite(float(so)):
+                        so_cell = f"{'—':>{w_so}}"
+                    elif np.isfinite(float(so)):
+                        so_cell = f"{float(so):>{w_so}.4f}"
                     else:
-                        row += f" {m['orig']:>9.4f} {m['score']:>7.4f}"
-            chaos = "N/A"
-            if all(n in metric_names for n in ("D2", "K2", "LLE")):
-                chaos = (
+                        so_cell = f"{'nan':>{w_so}}"
+                    row += f" {m['orig']:>{w_om}.4f} {so_cell} {float(zv):>7.4f}"
+            has_dkl = all(n in metric_names for n in DKL_METRICS)
+            only_rqa = bool(metric_names) and all(n in RQA_METRICS for n in metric_names)
+            if has_dkl:
+                rej_all = (
                     "YES"
-                    if all(info["conclusion"].get(n) == "reject H0" for n in ("D2", "K2", "LLE"))
+                    if all(info["conclusion"].get(n) == "reject H0" for n in DKL_METRICS)
                     else "NO"
                 )
-            row += f" {chaos:>7}"
+            elif only_rqa:
+                rej_all = (
+                    "YES"
+                    if all(info["conclusion"].get(n) == "reject H0" for n in metric_names)
+                    else "NO"
+                )
+            else:
+                rej_all = "—"
+            row += f" {rej_all:>7}"
             fh.write(row + "\n")
 
-        fh.write("\nRule for chaos = YES: D2, K2 and LLE all reject H0 (p-value < 0.05); N/A when current summary scope omits required metrics.\n\n")
+        fh.write(
+            "\nColumn rej_all: YES if every metric in scope rejects H0 at the run alpha (default 0.01). "
+            "DKL scope: requires D2, K2, LLE in the summary. RQA-only scope: requires all listed metrics "
+            f"from {RQA_METRICS} only. "
+            "Mixed or incomplete scopes: — . "
+            "std_orig em dash (—): not defined for PyRQA scalars (hypothesis reports NaN).\n\n"
+        )
 
         for fp, info in parsed_infos:
             if info is None:
@@ -506,17 +633,38 @@ def cmd_boot_aggregate(path, _n=None):
             fh.write(f"Source: {fp}\n")
             fh.write(f"Symbol: {info['symbol']}   Mode: {info['mode']}   N: {info['n']}\n")
             fh.write(f"  tau={info['tau']}, W={info['W']}, B={info['B']}\n")
-            fh.write(f"  {'metric':<6} {'orig':>10} {'surr_mean':>12} {'surr_std':>12} {'score':>9} {'p-value':>11}  conclusion\n")
+            fh.write(
+                f"  {'metric':<6} {'orig_mean':>10} {'std_orig':>10} {'surr_mean':>12} {'surr_std':>12} "
+                f"{'SE(surr)':>10} {'z_sigma':>9} {'p-value':>11}  conclusion\n"
+            )
             for name in metric_names:
                 m = info["metrics"].get(name, {})
                 con = info["conclusion"].get(name, "n/a")
                 if m:
+                    _pv = m.get("pvalue", float("nan"))
+                    _pv_s = f"{float(_pv):>11.4f}" if np.isfinite(float(_pv)) else f"{'nan':>11}"
+                    zv = m.get("z_sigma", m.get("score", float("nan")))
+                    _so = m.get("std_orig", float("nan"))
+                    if name in RQA_METRICS and not np.isfinite(float(_so)):
+                        _so_s = f"{'—':>10}"
+                    elif np.isfinite(float(_so)):
+                        _so_s = f"{float(_so):>10.4f}"
+                    else:
+                        _so_s = f"{'nan':>10}"
+                    _se = m.get("se_surr", float("nan"))
+                    _se_s = (
+                        f"{float(_se):>10.4f}"
+                        if np.isfinite(float(_se))
+                        else f"{'nan':>10}"
+                    )
                     fh.write(
-                        f"  {name:<6} {m['orig']:>10.4f} {m['mean']:>12.4f} "
-                        f"{m['std']:>12.4f} {m['score']:>9.4f} {m.get('pvalue', float('nan')):>11.6g}  {con}\n"
+                        f"  {name:<6} {m['orig']:>10.4f} {_so_s} {m['mean']:>12.4f} "
+                        f"{m['std']:>12.4f} {_se_s} {float(zv):>9.4f} {_pv_s}  {con}\n"
                     )
                 else:
-                    fh.write(f"  {name:<6} {'nan':>10} {'nan':>12} {'nan':>12} {'nan':>9} {'nan':>11}  {con}\n")
+                    fh.write(
+                        f"  {name:<6} {'nan':>10} {'nan':>10} {'nan':>12} {'nan':>12} {'nan':>10} {'nan':>9} {'nan':>11}  {con}\n"
+                    )
             if info["T_original"]:
                 fh.write(f"  Predictability T (original) : {info['T_original']}\n")
             if info["T_bootstrap"]:

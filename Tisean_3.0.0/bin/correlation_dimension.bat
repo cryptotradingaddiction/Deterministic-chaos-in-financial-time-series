@@ -10,7 +10,7 @@ REM ============================================================================
 
 REM ------------------------------ USER CONFIG ---------------------------------
 REM Optional: set DCH_DECISION_ABS_Z_SIGMA=3   -> hypothesis uses |z_sigma|>=3 for decision column (thesis "3 sigma" rule).
-set TEST_MODE=true
+set TEST_MODE=false
 if defined DCH_TEST_MODE set TEST_MODE=%DCH_TEST_MODE%
 set DATA_DIR=C:\DCh\data
 set RESULTS_DIR=%DATA_DIR%\results

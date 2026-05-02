@@ -108,7 +108,7 @@ for %%F in (%FILES%) do (
     set "HYP_DIR=!RUN2_DIR!\hypothesis_rqa"
     if not exist "!HYP_DIR!" mkdir "!HYP_DIR!"
     echo   [Hypothesis] RQA-only surrogate test ^(tau=!COIN_TAU!, W=!COIN_W!^)
-    "%PYTHON_EXE%" %PYTHON_ARGS% "C:\DCh\hypothesis.py" --input "!DATA_FILE!" --base "!BASE!" --delay !COIN_TAU! --theiler !COIN_W! --output_dir "!HYP_DIR!" --test_mode "%TEST_MODE%" --metrics_list "RR,DET,LAM,MAXLINE,ENTR,TT"
+    "%PYTHON_EXE%" %PYTHON_ARGS% "C:\DCh\hypothesis.py" --input "!DATA_FILE!" --base "!BASE!" --delay !COIN_TAU! --theiler !COIN_W! --rqa_radius !COIN_RAD! --output_dir "!HYP_DIR!" --test_mode "%TEST_MODE%" --metrics_list "RR,DET,LAM,MAXLINE,ENTR,TT"
     if errorlevel 1 exit /b 1
     "%PYTHON_EXE%" %PYTHON_ARGS% "%PRINT_RESULTS%" boot "!HYP_DIR!\!BASE!_surrogate_summary.txt"
 )

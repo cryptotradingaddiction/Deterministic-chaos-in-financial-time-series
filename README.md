@@ -56,7 +56,6 @@ The hypothesis part is distributed across per-invariant batch scripts and consol
 
 ## Current Architecture (Important)
 
-
 ### Active execution model
 
 - `run1` is removed from active workflow.
@@ -78,7 +77,6 @@ The hypothesis part is distributed across per-invariant batch scripts and consol
 ---
 
 ## Quick Start
-
 
 ### 1) Install Python dependencies
 
@@ -132,9 +130,11 @@ Notes:
 
 The pipelines under `Tisean_3.0.0\bin\*.bat` are **Windows Command Prompt** scripts (`cmd.exe`). They are **not** PowerShell (`.ps1`). Below is the syntax you will actually see, in plain language.
 
+
 ### What runs the script
 
 - **Double‑clicking** a `.bat` runs it in a minimal window that may close when finished — fine for quick runs; read errors by adding `pause` temporarily or running from an open console (next bullet).
+
 - **Recommended:** open **Command Prompt** (search “cmd”), `cd` to the folder that contains the batch file, then run:
 
 ```bat
@@ -143,6 +143,7 @@ hypothesis.bat
 ```
 
 `cd /d` changes drive **and** directory (needed when `C:` vs `D:` differs from your current drive).
+
 
 ### Lines that appear at the top of almost every script
 
@@ -153,14 +154,18 @@ hypothesis.bat
 | `setlocal enabledelayedexpansion` | Allows `!VAR!` syntax (see below). Used wherever the loop variable `BASE` changes and is read again in the same block. |
 | `REM ...` | Comment (ignored). |
 
+
 ### Setting and reading variables
 
 - **`set NAME=value`** — no spaces around `=` in classic `set` (e.g. `set DATA_DIR=C:\DCh\data`).
+
 - **`set "NAME=value"`** — quoted form; safer when the value contains spaces or trailing spaces.
 
 **Immediate expansion `%VAR%`:** replaced once when the **whole line** is parsed (before loops run). Fine for paths fixed at the start.
 
+
 **Delayed expansion `!VAR!`:** evaluated **when each line runs**, inside `( )` blocks and loops — required when a variable is **set and then read** in the same `for` loop. All invariant pipelines use this for `!BASE!`, `!DATA_FILE!`, etc.
+
 
 ### Special parameters (`%0`, `%1`, `%~dp0`)
 
@@ -170,25 +175,34 @@ hypothesis.bat
 | `%~dp0` | **D**rive + **p**ath of the folder containing the script (trailing `\`). Used so `call "%~dp0_per_coin_settings.bat"` always finds the helper next to the caller, no matter your current directory. |
 | `%~1` | First argument to a subroutine, with quotes stripped; `%~2` second, etc. Used in `:RUN_D2`, `:RUN_LLE`, `:RUN_RQA`. |
 
+
 ### Calling another batch vs “including” it
 
 - **`call other.bat`** runs `other.bat` and **returns** to the caller. Without `call`, control would not come back.
+
 - **`call :LABEL arg1 arg2`** jumps to a **subroutine** `:LABEL` inside the same file; **`exit /b`** returns from it (without closing the whole window).
+
 
 ### Success and failure
 
 - **`if errorlevel 1`** is true if the **last** program returned a non‑zero exit code (often used after `lyap_k.exe`, Python, etc.).
+
 - **`exit /b 1`** stops this batch with error code `1` (parent `hypothesis.bat` can detect failure).
+
 
 ### Quotes, spaces, and special characters in `echo`
 
 - Paths with spaces **must** be quoted: `"%GNUPLOT_EXE%"`.
+
 - **`^`** escapes the next character for **this** parse pass: `echo run2 = per-symbol (TAU_D2_^<sym^>)` prints literal `<` and `>` instead of redirecting input/output.
+
 - **`()`** in `echo` lines are often wrapped with `^(` `^)` so `cmd` does not treat them as **block** syntax.
+
 
 ### Line continuation (outside `.bat` examples)
 
 In README examples, **`^` at end of line** continues a **single** command on the next line (standard `cmd` continuation). The **`^` must be the last character** on the line (no trailing spaces).
+
 
 ### `for` loops: why `%%F` not `%F`
 
@@ -202,6 +216,7 @@ for %%F in (%FILES%) do (
 
 `%FILES` expands to the whole list of filenames **once**; `%%F` is each file in turn.
 
+
 ### Nested `for /f`: extracting the coin symbol
 
 ```bat
@@ -209,6 +224,7 @@ for /f "tokens=1 delims=_" %%A in ("%%F") do set BASE=%%A
 ```
 
 Splits `BTCUSD_BITSTAMP_...` on `_` and takes the **first** token → `BASE=BTCUSD`.
+
 
 ### Dynamic variable names: `call set`
 
@@ -220,6 +236,7 @@ call set "COIN_TAU=%%TAU_LLE_!BASE!%%"
 
 **How to read it:** the inner `%% ... %%` is resolved in a second step so the **name** becomes `TAU_LLE_BTCUSD` and its **value** is assigned to `COIN_TAU`. Without this trick, `%TAU_LLE_%BASE%` would not work as intended.
 
+
 ### Redirects and quick I/O
 
 | Syntax | Meaning |
@@ -229,17 +246,22 @@ call set "COIN_TAU=%%TAU_LLE_!BASE!%%"
 | `>nul` | Discard output. |
 | `2>&1` | Send stderr to same place as stdout (often seen with gnuplot). |
 
+
 ### Chained commands
 
 - **`command1 && command2`** — run `command2` only if `command1` succeeded (exit code 0).
+
 - **`command1 || command2`** — run `command2` only if `command1` failed (non‑zero exit).
+
 - Example from the scripts: `cd /d "%DATA_DIR%" || (echo ERROR: Cannot enter %DATA_DIR% & exit /b 1)` — if changing directory fails, print and stop with error code 1.
 
 <a id="recurr-batch-percent-flag"></a>
 
+
 ### Why `recurr` uses `-%%2` in the `.bat` file
 
 In a batch file, **`%%` prints one literal `%` character** (and does **not** expand `%2` as “second script argument”). So **`-%%2`** is broken apart as: `-`, then **`%%` → `%`**, then **`2`** → the executable sees the flag **`- %2`** in TISEAN’s sense (**percentage / subsampling factor 2** → keep **2%** of recurrence pairs). If you typed `- %2` with only one `%`, CMD would try to treat `%2` as the batch file’s second argument instead of passing a percent sign to `recurr.exe`.
+
 
 ### Where PowerShell appears
 
@@ -248,7 +270,6 @@ Some steps call **`powershell -NoProfile -Command "..."`** to trim the first 200
 ---
 
 ## End-to-End Workflow
-
 
 ### Step 1 - Download raw candles
 
@@ -290,7 +311,6 @@ What happens per symbol:
 
 ## Distributed Hypothesis Workflow
 
-
 ### Why distributed
 
 Each invariant family has different output files, parameterization, and practical compute profile. Running hypothesis testing inside each invariant script keeps:
@@ -313,7 +333,6 @@ Each invariant family has different output files, parameterization, and practica
 ---
 
 ## Statistical Model (Current, Supervisor-Aligned)
-
 
 ### Null and alternative hypotheses
 
@@ -364,7 +383,6 @@ In `hypothesis.py`, surrogate replicate count **`B`** is **100** in both modes (
 ---
 
 ## Outputs and Folder Structure
-
 
 ### Root result folders
 
@@ -443,7 +461,6 @@ Operational notes:
 ---
 
 ## Repository Map
-
 
 ### Core pipeline scripts
 
@@ -925,7 +942,6 @@ Expected binary:
 ---
 
 ## Troubleshooting
-
 
 ### Python launcher issues
 

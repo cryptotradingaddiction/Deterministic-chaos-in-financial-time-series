@@ -9,7 +9,8 @@ REM   run2 = per-symbol (TAU_D2_<sym>, W_D2_<sym>) from _per_coin_settings.bat
 REM ============================================================================
 
 REM ------------------------------ USER CONFIG ---------------------------------
-set TEST_MODE=false
+REM Optional: set DCH_DECISION_ABS_Z_SIGMA=3   -> hypothesis uses |z_sigma|>=3 for decision column (thesis "3 sigma" rule).
+set TEST_MODE=true
 if defined DCH_TEST_MODE set TEST_MODE=%DCH_TEST_MODE%
 set DATA_DIR=C:\DCh\data
 set RESULTS_DIR=%DATA_DIR%\results
@@ -103,7 +104,9 @@ for %%F in (%FILES%) do (
     set "HYP_DIR=!RUN2_DIR!\hypothesis_d2"
     if not exist "!HYP_DIR!" mkdir "!HYP_DIR!"
     echo   [Hypothesis] D2-only surrogate test ^(tau=!COIN_TAU!, W=!COIN_W!^)
-    "%PYTHON_EXE%" %PYTHON_ARGS% "C:\DCh\hypothesis.py" --input "!DATA_FILE!" --base "!BASE!" --delay !COIN_TAU! --theiler !COIN_W! --output_dir "!HYP_DIR!" --test_mode "%TEST_MODE%" --metrics_list "D2"
+    set "HYP_ZSIG="
+    if defined DCH_DECISION_ABS_Z_SIGMA set "HYP_ZSIG=--decision_abs_z_sigma !DCH_DECISION_ABS_Z_SIGMA!"
+    "%PYTHON_EXE%" %PYTHON_ARGS% "C:\DCh\hypothesis.py" --input "!DATA_FILE!" --base "!BASE!" --delay !COIN_TAU! --theiler !COIN_W! --output_dir "!HYP_DIR!" --test_mode "%TEST_MODE%" --metrics_list "D2" !HYP_ZSIG!
     if errorlevel 1 exit /b 1
     "%PYTHON_EXE%" %PYTHON_ARGS% "%PRINT_RESULTS%" boot "!HYP_DIR!\!BASE!_surrogate_summary.txt"
 )

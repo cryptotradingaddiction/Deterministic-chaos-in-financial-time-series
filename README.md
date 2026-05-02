@@ -371,7 +371,11 @@ z_sigma = (X_orig - mu_surr) / SD(surr)     # Theiler-style; comparable across B
 z_SE    = (X_orig - mu_surr) / SE_surr     # SE_surr = SD(surr)/sqrt(B); depends on B
 ```
 
-Decision: if `p < 0.05` -> reject `H0`; else fail to reject `H0`.
+Decision (default): if empirical `p < 0.05` -> reject `H0`; else fail to reject `H0`.
+
+Optional **`--decision_abs_z_sigma K`** (e.g. `3`): the **`decision` column** uses **`|z_sigma| ≥ K`** instead of the p-value threshold; **p-values in the file are still empirical** (useful if you want a fixed “Kσ” rule for the thesis while keeping rank-based p for reporting).
+
+`d2.exe` runs inside `hypothesis.py` with **`-M1,3`**, matching `EMBED=1,3` in `correlation_dimension.bat` / `correlation_entropy.bat`.
 
 Summary files report `SD(surr)`, `z_sigma`, `z_SE` with **explicit B in the column header** (e.g. `z_SE(B=100)`), **empirical** `p-value`, and the text `decision` per row.
 

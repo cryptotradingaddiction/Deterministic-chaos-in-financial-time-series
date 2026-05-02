@@ -25,7 +25,8 @@ logger = logging.getLogger(__name__)
 
 FULL_B = 100
 TEST_B = 100
-M_D2 = 30
+# Must match `EMBED` max in `correlation_dimension.bat` / `correlation_entropy.bat` (`-M1,3` → m≤3).
+M_D2 = 3
 M_LYAP = 100
 R_RECURR = 0.01
 RQA_EMBEDDING_DIM = 3
@@ -503,6 +504,16 @@ def main():
         default=100,
         help="Number of contiguous blocks used for block-permutation surrogate generation (default 100).",
     )
+    parser.add_argument(
+        "--decision_abs_z_sigma",
+        type=float,
+        default=None,
+        metavar="K",
+        help=(
+            "If set (e.g. 3), reject H0 when |z_sigma|>=K instead of using empirical p<0.05. "
+            "Does not override 'insufficient data'. p-values in the table are unchanged."
+        ),
+    )
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -521,10 +532,15 @@ def main():
     metrics_label = ",".join(metric_names)
     print(f"  -> Starting permutation-surrogate hypothesis test for {args.base} (tau={args.delay}, W={args.theiler})")
     print(f"  -> Mode: {'TEST' if test_mode else 'FULL'}, surrogate replicates B={b_reps}, metrics={metrics_label}")
+    _dec_msg = (
+        f"decision by |z_sigma|>={args.decision_abs_z_sigma:g} (not p-threshold)"
+        if args.decision_abs_z_sigma is not None
+        else "decision by empirical p<0.05"
+    )
     print(
         f"  -> Surrogates: block permutation (N_blocks={args.surrogate_blocks}); "
         "inference: empirical p from surrogate ranks (Theiler-style); "
-        f"z_sigma / z_SE(B={b_reps}) (column label) descriptive only; decision by p<0.05."
+        f"z_sigma / z_SE(B={b_reps}) in table; {_dec_msg}."
     )
 
     orig_data = load_data(args.input)
@@ -571,6 +587,17 @@ def main():
         p_values[k] = p_val
         decisions[k] = dec
 
+    if args.decision_abs_z_sigma is not None:
+        thr = float(args.decision_abs_z_sigma)
+        for k in metric_names:
+            if decisions[k] == "insufficient data":
+                continue
+            zs = z_sigma_scores[k]
+            if np.isfinite(zs) and abs(zs) >= thr:
+                decisions[k] = "reject H0"
+            elif np.isfinite(zs):
+                decisions[k] = "fail to reject H0"
+
     lle_orig = orig.get("LLE", np.nan)
     T_orig = predictability_time(lle_orig)
     lle_boot = boot_clean.get("LLE", np.array([]))
@@ -597,12 +624,20 @@ def main():
         handle.write(f"Original data length: {n}\n")
         handle.write(f"Mode: {'TEST' if test_mode else 'FULL'}\n")
         handle.write("Surrogates: block permutation of observed series (contiguous blocks shuffled in random order).\n")
+        _rule_p = (
+            "Reject H0 if p < 0.05 (empirical rank p-values)."
+            if args.decision_abs_z_sigma is None
+            else (
+                f"Reject H0 if |z_sigma| >= {args.decision_abs_z_sigma:g} "
+                "(decision column only; p-values still empirical)."
+            )
+        )
         handle.write(
             "Inference : empirical p-values from surrogate counts (+1 / B+1 correction); "
             "tails: D2,K2=lower; LLE=upper; RQA=two_sided (see METRIC_EMPIRICAL_TAIL in hypothesis.py). "
-            "z_sigma = (orig-mean)/SD(surr) (Theiler-style, descriptive); "
-            f"z_SE(B={b_reps}) = (orig-mean)/(SD/sqrt(B)) — SE uses this run’s B (descriptive only). "
-            "Reject H0 if p < 0.05.\n\n"
+            "z_sigma = (orig-mean)/SD(surr) (Theiler-style); "
+            f"z_SE(B={b_reps}) = (orig-mean)/(SD/sqrt(B)) — descriptive. "
+            f"{_rule_p}\n\n"
         )
         handle.write(
             f"Invariant       Orig.    Mean(surr)  SD(surr)    z_sigma   z_SE(B={b_reps})    p-value    decision\n"

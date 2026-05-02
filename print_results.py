@@ -297,6 +297,13 @@ def _parse_bootstrap_summary(path):
     if m:
         info["mode"] = m.group(1)
 
+    # hypothesis.py v3: Orig Mean SD z_sigma z_SE p-value decision
+    row_re_empirical_z = re.compile(
+        r"^(?P<name>\S+)\s+(?P<orig>-?(?:nan|inf|\d+\.\d+))\s+(?P<mean>-?(?:nan|inf|\d+\.\d+))\s+"
+        r"(?P<std>-?(?:nan|inf|\d+\.\d+))\s+(?P<z_sigma>-?(?:nan|inf|\d+\.\d+))\s+"
+        r"(?P<z_se>-?(?:nan|inf|\d+\.\d+))\s+(?P<pvalue>-?(?:nan|inf|\d*\.?\d+(?:[eE][+-]?\d+)?))\s+"
+        r"(?P<decision>reject H0|fail to reject H0|insufficient data)\s*$"
+    )
     row_re_new_no_sem = re.compile(
         r"^(?P<name>\S+)\s+(?P<orig>-?\d+\.\d+)\s+(?P<mean>-?\d+\.\d+)\s+"
         r"(?P<std>-?\d+\.\d+)\s+(?P<score>-?(?:nan|inf|\d+\.\d+))\s*$"
@@ -319,8 +326,44 @@ def _parse_bootstrap_summary(path):
         r"^(?P<name>\S+)\s+(?P<orig>-?\d+\.\d+)\s+(?P<mean>-?\d+\.\d+)\s*\+\-\s*"
         r"(?P<std>-?\d+\.\d+)\s+(?P<score>-?\d+\.\d+)\s*$"
     )
+    def _parse_float_tok(s):
+        sl = (s or "").strip().lower()
+        if sl == "nan":
+            return float("nan")
+        if sl in ("inf", "+inf"):
+            return float("inf")
+        if sl == "-inf":
+            return float("-inf")
+        return float(s)
+
     for line in text.splitlines():
         line_st = line.strip()
+        rm = row_re_empirical_z.match(line_st)
+        if rm is not None and rm.group("name") in metric_names_row:
+            name = rm.group("name")
+            zs = _parse_float_tok(rm.group("z_sigma"))
+            zse = _parse_float_tok(rm.group("z_se"))
+            pv_raw = rm.group("pvalue")
+            if pv_raw == "nan":
+                pvalue = float("nan")
+            elif pv_raw in ("inf", "+inf"):
+                pvalue = float("inf")
+            elif pv_raw == "-inf":
+                pvalue = float("-inf")
+            else:
+                pvalue = float(pv_raw)
+            info["metrics"][name] = {
+                "orig": _parse_float_tok(rm.group("orig")),
+                "mean": _parse_float_tok(rm.group("mean")),
+                "std": _parse_float_tok(rm.group("std")),
+                "z_sigma": zs,
+                "z_se": zse,
+                "score": zs,
+                "pvalue": pvalue,
+            }
+            info["conclusion"][name] = rm.group("decision")
+            continue
+
         rm = row_re_new_no_sem.match(line_st)
         if rm is None:
             rm = row_re_new_no_sem_p.match(line_st)

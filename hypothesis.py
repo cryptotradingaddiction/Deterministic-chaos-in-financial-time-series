@@ -403,7 +403,7 @@ def empirical_surrogate_test(
     boot_dist: np.ndarray,
     orig_val: float,
     tail: str,
-) -> tuple[float, float, str]:
+) -> tuple[float, float, float, str]:
     """
     Rank/count empirical p-value from B surrogate replicates (no Gaussian / t-assumption).
 
@@ -414,7 +414,9 @@ def empirical_surrogate_test(
     tail='upper' uses p_upper; 'lower' uses p_lower.
     tail='two_sided' uses min(1, 2 * min(p_upper, p_lower)) when direction is not fixed a priori.
 
-    Also returns z_descr = |T_orig - mean(T)| / SE(T) with SE = SD/sqrt(B) for display only — not used for p.
+    Descriptive (not used for p):
+      z_sigma = (T_orig - mean(T)) / SD(T)  — sigma-score (Theiler-style).
+      z_se    = (T_orig - mean(T)) / SE(T) with SE = SD/sqrt(B) — sensitive to B; for comparison only.
 
     Decision: reject H0 if p < 0.05.
     """
@@ -422,15 +424,23 @@ def empirical_surrogate_test(
     bd = bd[np.isfinite(bd)]
     b_reps = len(bd)
     if b_reps < 1 or not np.isfinite(orig_val):
-        return float("nan"), float("nan"), "insufficient data"
+        return float("nan"), float("nan"), float("nan"), "insufficient data"
 
     m = float(np.mean(bd))
     sd = float(np.std(bd, ddof=1)) if b_reps > 1 else 0.0
     se = sd / np.sqrt(b_reps) if b_reps > 0 else float("nan")
-    if se > 0 and np.isfinite(se):
-        z_descr = abs(orig_val - m) / se
+
+    if sd > 0:
+        z_sigma = float((orig_val - m) / sd)
+    elif np.isfinite(orig_val) and np.isfinite(m) and np.isclose(orig_val, m, rtol=0.0, atol=1e-12):
+        z_sigma = 0.0
     else:
-        z_descr = float("inf") if orig_val != m else 0.0
+        z_sigma = float(np.sign(orig_val - m)) * float("inf")
+
+    if np.isfinite(se) and se > 0:
+        z_se = float((orig_val - m) / se)
+    else:
+        z_se = float("nan")
 
     ge = int(np.sum(bd >= orig_val))
     le = int(np.sum(bd <= orig_val))
@@ -449,7 +459,7 @@ def empirical_surrogate_test(
     decision = (
         "reject H0" if np.isfinite(p_val) and (p_val < 0.05) else "fail to reject H0"
     )
-    return float(z_descr), float(p_val), decision
+    return z_sigma, z_se, float(p_val), decision
 
 
 def predictability_time(lle, eps=PRED_EPSILON, tol=PRED_TOLERANCE):
@@ -499,7 +509,7 @@ def main():
     print(
         f"  -> Surrogates: block permutation (N_blocks={args.surrogate_blocks}); "
         "inference: empirical p from surrogate ranks (Theiler-style); "
-        "SE and z_descr are descriptive only; decision by p<0.05."
+        "z_sigma / z_SE(B) descriptive only; decision by p<0.05."
     )
 
     orig_data = load_data(args.input)
@@ -533,14 +543,16 @@ def main():
         args.input, args.output_dir, args.base, args.delay, args.theiler, metric_names=metric_names
     )
 
-    boot_clean = {k: arr[~np.isnan(arr)] for k, arr in boot.items()}
-    scores = {}
+    boot_clean = {k: arr[np.isfinite(arr)] for k, arr in boot.items()}
+    z_sigma_scores: dict[str, float] = {}
+    z_se_scores: dict[str, float] = {}
     p_values = {}
     decisions = {}
     for k in metric_names:
         tail_k = METRIC_EMPIRICAL_TAIL.get(k, "two_sided")
-        score, p_val, dec = empirical_surrogate_test(boot_clean[k], orig[k], tail_k)
-        scores[k] = score
+        zs, zse, p_val, dec = empirical_surrogate_test(boot_clean[k], orig[k], tail_k)
+        z_sigma_scores[k] = zs
+        z_se_scores[k] = zse
         p_values[k] = p_val
         decisions[k] = dec
 
@@ -573,24 +585,35 @@ def main():
         handle.write(
             "Inference : empirical p-values from surrogate counts (+1 / B+1 correction); "
             "tails: D2,K2=lower; LLE=upper; RQA=two_sided (see METRIC_EMPIRICAL_TAIL in hypothesis.py). "
-            "SE = SD(surr)/sqrt(B) and z_descr = |orig-mean|/SE are descriptive only. "
+            "z_sigma = (orig-mean)/SD(surr) (Theiler-style, descriptive); "
+            "z_SE(B) = (orig-mean)/(SD/sqrt(B)) depends on B (descriptive only). "
             "Reject H0 if p < 0.05.\n\n"
         )
         handle.write(
-            "Invariant       Orig.    Mean(surr)  SD(surr)      SE(surr)    z_descr    p-value\n"
+            "Invariant       Orig.    Mean(surr)  SD(surr)    z_sigma   z_SE(B)    p-value    decision\n"
         )
-        handle.write("---------------------------------------------------------------------------------\n")
+        handle.write(
+            "---------------------------------------------------------------------------------------------------\n"
+        )
+
+        def _fmt_zcol(z: float) -> str:
+            if np.isnan(z):
+                return "      nan"
+            return f"{z:>10.4f}"
+
         for metric in metric_names:
             bd = boot_clean[metric]
             mn = safe_mean(bd)
             sdb = safe_std(bd)
-            seb = (sdb / np.sqrt(len(bd))) if (len(bd) > 0 and np.isfinite(sdb)) else float("nan")
-            sc = scores[metric]
+            zs = z_sigma_scores[metric]
+            zse = z_se_scores[metric]
             pv = p_values[metric]
-            ss = f"{sc:>9.4f}" if np.isfinite(sc) else "      nan"
-            pp = f"{pv:>9.4e}" if np.isfinite(pv) else "      nan"
+            ssig = _fmt_zcol(zs)
+            sse = _fmt_zcol(zse)
+            pp = f"{pv:>10.4e}" if np.isfinite(pv) else "      nan"
             handle.write(
-                f"{metric:<14} {orig[metric]:>8.4f}  {mn:>10.4f}  {sdb:>10.4f}  {seb:>10.4f}  {ss}  {pp}\n"
+                f"{metric:<14} {orig[metric]:>8.4f}  {mn:>10.4f}  {sdb:>10.4f}  {ssig}  {sse}  {pp}  "
+                f"{decisions[metric]}\n"
             )
         handle.write("\nConclusion (decision by p-value < 0.05):\n")
         for metric in metric_names:

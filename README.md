@@ -1,6 +1,6 @@
 # Deterministic Chaos in Financial Time Series
 
-This repository serves as storage for codebase used in my bachelor's thesis focused on "Determining the presence of deterministic chaos in financial time series", released in June 2026 in Czech. End-to-end research pipeline for nonlinear analysis of cryptocurrency log-return time series, with distributed surrogate-based hypothesis testing.
+End-to-end research pipeline for nonlinear analysis of cryptocurrency log-return time series, with distributed surrogate-based hypothesis testing.
 
 This project combines:
 
@@ -70,7 +70,7 @@ The hypothesis part is distributed across per-invariant batch scripts and consol
 
 - Surrogates: **block permutation surrogates** (not point-wise shuffle).
 - **Inference:** empirical **p-values from ranks/counts** over `B` surrogate metric draws (no Gaussian / Student‑t assumption on the surrogate distribution).
-- **Descriptive only:** `SE_surr = SD(surr)/sqrt(B)` and `z_descr = |X_orig - mu_surr| / SE_surr` are reported for scale — **they do not define p**.
+- **Descriptive only:** `z_sigma = (X_orig - mu_surr) / SD(surr)` (Theiler-style sigma score) and `z_SE = (X_orig - mu_surr) / SE_surr` with `SE_surr = SD(surr)/sqrt(B)` — **they do not define p** (note `z_SE` scales with `B`).
 - Decision rule: reject `H0` if `p-value < 0.05`.
 
 ---
@@ -367,13 +367,13 @@ Tails are set in `METRIC_EMPIRICAL_TAIL` in `hypothesis.py` (edit there if you n
 **Descriptive columns (not used for p):**
 
 ```text
-SE_surr = SD(surr) / sqrt(B)
-z_descr   = |X_orig - mu_surr| / SE_surr
+z_sigma = (X_orig - mu_surr) / SD(surr)     # Theiler-style; comparable across B
+z_SE    = (X_orig - mu_surr) / SE_surr     # SE_surr = SD(surr)/sqrt(B); depends on B
 ```
 
 Decision: if `p < 0.05` -> reject `H0`; else fail to reject `H0`.
 
-Summary files report `SD(surr)`, `SE(surr)`, `z_descr`, and **empirical** `p-value` per metric.
+Summary files report `SD(surr)`, `z_sigma`, `z_SE` (as `z_SE(B)`), **empirical** `p-value`, and the text `decision` per row.
 
 ### Replicate count
 
@@ -424,8 +424,10 @@ In each `<BASE>_surrogate_summary.txt`, key columns are:
 - `Orig.` - metric value on original data,
 - `Mean(surr)` - average across surrogates,
 - `SD(surr)` - sample SD across surrogates,
-- `z_descr` - `|Orig. − Mean(surr)| / SE(surr)` (descriptive only; not the basis for `p-value`),
-- `p-value` - **empirical** p-value from surrogate rank counts (`(1 + #{extremal surrogates})/(B+1)`-style; see [Statistical Model](#statistical-model-current-supervisor-aligned)).
+- `z_sigma` - `(Orig. − Mean(surr)) / SD(surr)` (Theiler-style; descriptive),
+- `z_SE(B)` - `(Orig. − Mean(surr)) / SE(surr)` with `SE = SD/√B` (descriptive; **depends on B**),
+- `p-value` - **empirical** p-value from surrogate rank counts (see [Statistical Model](#statistical-model-current-supervisor-aligned)),
+- `decision` - per-metric `reject H0` / `fail to reject H0` (and `insufficient data` if applicable).
 
 Interpretation:
 

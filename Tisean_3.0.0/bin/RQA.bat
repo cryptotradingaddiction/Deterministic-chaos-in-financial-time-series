@@ -174,15 +174,15 @@ echo   Output dir: !OUT_DIR!
 echo   --------------------------------------------------
 
 echo   [1/2] recurr: recurrence matrix...
-"%TISEAN%\recurr.exe" -m%COMPONENTS%,%EMBED_DIM% -d!TAU_DELAY! -r!RADIUS! -%%2 -o "!OUT_DIR!\!BASE!_recurr.rec" "!DATA_FILE!"
+"%TISEAN%\recurr.exe" -m%COMPONENTS%,%EMBED_DIM% -d!TAU_DELAY! -r!RADIUS! -%%2 -o "!OUT_DIR!\!BASE!_recurr.txt" "!DATA_FILE!"
 if errorlevel 1 exit /b 1
-"%PYTHON_EXE%" %PYTHON_ARGS% "%PRINT_RESULTS%" rec "!OUT_DIR!\!BASE!_recurr.rec"
+"%PYTHON_EXE%" %PYTHON_ARGS% "%PRINT_RESULTS%" rec "!OUT_DIR!\!BASE!_recurr.txt"
 
->> "%AGG_FILE%" echo !BASE!,!RUN_ID!,!TAU_DELAY!,!RADIUS!,!OUT_DIR!\!BASE!_recurr.rec
+>> "%AGG_FILE%" echo !BASE!,!RUN_ID!,!TAU_DELAY!,!RADIUS!,!OUT_DIR!\!BASE!_recurr.txt
 
 echo   [2/2] plot: recurrence matrix...
 if /i "%HAS_GNUPLOT%"=="true" (
-    "%GNUPLOT_EXE%" -e "set terminal pngcairo size 1200,1200 enhanced; set output '!OUT_DIR!\!BASE!_recurrence.png'; unset key; set title '!BASE! Recurrence Plot ^(tau=!TAU_DELAY!, r=!RADIUS!, m=%EMBED_DIM%^) %TEST_SUFFIX%'; set xlabel 'Time index'; set ylabel 'Time index'; plot '!OUT_DIR!\!BASE!_recurr.rec' with dots lc rgb 'black'" > "!OUT_DIR!\gnuplot.log" 2>&1
+    "%GNUPLOT_EXE%" -e "set terminal pngcairo size 1200,1200 enhanced; set output '!OUT_DIR!\!BASE!_recurrence.png'; unset key; set title '!BASE! Recurrence Plot ^(tau=!TAU_DELAY!, r=!RADIUS!, m=%EMBED_DIM%^) %TEST_SUFFIX%'; set xlabel 'Time index'; set ylabel 'Time index'; plot '!OUT_DIR!\!BASE!_recurr.txt' with dots lc rgb 'black'" > "!OUT_DIR!\gnuplot.log" 2>&1
     "%PYTHON_EXE%" %PYTHON_ARGS% "%PRINT_RESULTS%" file "!OUT_DIR!\!BASE!_recurrence.png"
 )
 echo(

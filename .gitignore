@@ -16,6 +16,10 @@ config.yaml
 # Downloaded market data & pipeline outputs (large)
 data/
 
+# Local-only (not published)
+github/
+Sablona-zaverecne-prace-FFU.docx
+
 # Local MPI TISEAN tree (sources, docs, *.exe). Repo tracks only `bin/*.bat`; install
 # binaries from https://www.pks.mpg.de/tisean/ after clone (see README).
 /Tisean_3.0.0/

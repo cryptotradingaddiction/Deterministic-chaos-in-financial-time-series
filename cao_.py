@@ -394,7 +394,6 @@ if __name__ == "__main__":
         )
         logger.info(f"Appended row to summary: {summary_path}")
 
-    # Grand finale
     print("\n" + "="*80)
     logger.info("ALL FILES SUCCESSFULLY PROCESSED AND GRAPHS SAVED!")
     print("="*80)

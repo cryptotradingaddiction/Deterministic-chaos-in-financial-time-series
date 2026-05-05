@@ -1,5 +1,5 @@
 # Deterministic Chaos in Financial Time Series
-This repository serves as storage for codebase used in my bachelor's thesis focused on "Determining the presence of deterministic chaos in financial time series", released in June 2026 in Czech.
+
 End-to-end research pipeline for nonlinear analysis of cryptocurrency log-return time series, with distributed surrogate-based hypothesis testing.
 
 This project combines:
@@ -422,7 +422,7 @@ Examples:
 
 Inside these, you get:
 
-- raw TISEAN outputs (`.d2`, `.h2`, `.c2`, `.rec`, etc.),
+- raw TISEAN outputs (`.d2`, `.h2`, `.c2`, recurrence listings `*_recurr.txt`, etc.),
 - optional plot images (`.png`) if gnuplot is available,
 - hypothesis subfolders such as:
   - `hypothesis_d2`,
@@ -728,9 +728,9 @@ Same scaling idea (count occupied ε-boxes in embedding space); here it is **imp
 
 | Binary | Scientific role | Primary outputs |
 |--------|-----------------|-----------------|
-| `d2.exe` | Grassberger–Procaccia correlation integral / local slopes `D₂(r,m)`; auxiliary `.h2`, `.c2` | `<BASE>.d2`, `.h2`, `.c2` |
+| `d2.exe` | Grassberger–Procaccia correlation integral / local slopes `D₂(ε,m)`; auxiliary `.h2`, `.c2` | `<BASE>.d2`, `.h2`, `.c2` |
 | `lyap_k.exe` | Kantz method — divergence curves `S(t)` vs iteration | `<BASE>_lyap.txt` |
-| `recurr.exe` | Recurrence matrix (sparse) | `<BASE>_recurr.rec` |
+| `recurr.exe` | Recurrence matrix (sparse listing) | `<BASE>_recurr.txt` (saved with `.txt` in this repo to avoid Windows `.rec` associations) |
 
 ### Where to read the full manuals
 
@@ -783,6 +783,7 @@ Interpretation:
 - **`-n500` sets 500 reference points**, not the number of time steps (`-s`). The batch variable name `STEPS` is misleading; time depth follows `-s` (default **50** if you do not pass `-s`).
 - **`-t` is not passed** to `lyap_k.exe` here → Theiler exclusion inside `lyap_k` defaults to **0**. **`hypothesis.py`** also calls `lyap_k` **without** `-t` (see `run_lyap_k`); `--theiler` from `W_D2_<sym>` is applied to **`d2`** and **PyRQA**, not to Kantz `lyap_k`. To align Lyapunov with the same temporal decorrelation as `d2`, add `-t<W>` consistently to both the BAT and `run_lyap_k`.
 - Neighbourhood search uses **[0.0005, 0.05]** in raw series units (typical for normalized or small-magnitude log-return data).
+- **Gnuplot (`Lambda_max.bat`):** each output **block** is one **ε-scan** at fixed embedding dimension (`#epsilon= … dim= …`). Legends label **ε blocks**, not different **m** (when `m_min=m_max`, several blocks are repeats over length scales).
 
 For comparison, **Rosenstein’s method** is `lyap_r` (not used in this repo); see [lyap_r](https://www.pks.mpg.de/tisean/Tisean_3.0.1/docs/docs_c/lyap_r.html).
 
@@ -806,11 +807,13 @@ For comparison, **Rosenstein’s method** is `lyap_r` (not used in this repo); s
 
 Outputs used here:
 
-- **`.d2`** — local slopes `D₂(r,m)` vs `ln r` (fed to `print_results.py d2`).
-- **`.h2`** — `ln C_m − ln C_{m+1}` family for **K2** path (`print_results.py h2`).
+- **`.d2`** — per `#dim=m` block: column **1** is the distance scale **ε**, column **2** is the **local slope** estimate **D₂(ε,m)** (MPI PKS `d2` convention). Optional gnuplot PNG overlays **m = 1…3** with **log-scaled ε** on the x-axis (the axis is log ε, not “ln r” as the stored first column).
+- **`.h2`** — same **ε** grid as `.d2`; ordinate is **K2** from `ln C_m − ln C_{m+1}` (`print_results.py h2`).
 - **`.c2`** — correlation integral itself (optional downstream).
 
 Manual: [d2](https://www.pks.mpg.de/tisean/Tisean_3.0.1/docs/docs_c/d2.html).
+
+**Plots (`correlation_dimension.bat` / `correlation_entropy.bat`, optional gnuplot):** `*_D2_all_m.png` and `*_K2_all_m.png` overlay **m = 1…3** (`index 0…2`) with **log-scaled ε** on the x-axis.
 
 ---
 
@@ -824,7 +827,7 @@ Manual: [d2](https://www.pks.mpg.de/tisean/Tisean_3.0.1/docs/docs_c/d2.html).
 |------|---------|
 | `-d#` | delay τ |
 | `-r#` | neighbourhood radius (same units as data / embedding distance) |
-| `-%#` | write only a **percentage** of recurrence pairs → keeps `.rec` files smaller (in `.bat`, **`-%%2`** becomes the literal flag **`- %2`** → **2%** subsampling; see [CMD primer](#recurr-batch-percent-flag)) |
+| `-%#` | write only a **percentage** of recurrence pairs → keeps listings smaller (in `.bat`, **`-%%2`** becomes the literal flag **`- %2`** → **2%** subsampling; see [CMD primer](#recurr-batch-percent-flag)) |
 | `-l#`, `-c#` | length limit, column |
 
 **Warning (manual):** `-r` too large → enormous sparse-matrix dumps.
@@ -858,7 +861,7 @@ lyap_k.exe -d<tau> -m3 -M3 -r0.0005 -R0.05 -n500 -o "<OUT>\<BASE>_lyap.txt" "<DA
 **Recurrence** (`RQA.bat`):
 
 ```text
-recurr.exe -m1,3 -d<tau> -r<radius> -%%2 -o "<OUT>\<BASE>_recurr.rec" "<DATA.dat>"
+recurr.exe -m1,3 -d<tau> -r<radius> -%%2 -o "<OUT>\<BASE>_recurr.txt" "<DATA.dat>"
 ```
 
 (See [Why `recurr` uses `-%%2`](#recurr-batch-percent-flag): batch **`%%`** emits one **`%`**, then **`2`** → TISEAN’s **2%** subsampling.)
@@ -1061,7 +1064,7 @@ When citing **TISEAN** in publications, use Hegger, Kantz, & Schreiber (1999) as
 
 **This repository (original Python code, batch orchestrators, documentation, and other files authored here)** is licensed under the **MIT License**.
 
-Copyright (c) 2026 Teodor Tsohla
+Copyright (c) 2026 cryptotradingaddiction
 
 See the full MIT text in [`LICENSE`](LICENSE).
 

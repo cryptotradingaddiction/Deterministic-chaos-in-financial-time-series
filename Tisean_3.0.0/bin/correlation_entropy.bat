@@ -41,7 +41,7 @@ if /i "%TEST_MODE%"=="true" (
 )
 
 echo [INFO] Output root : %OUT_ROOT%
-echo [INFO] m setting   : %EMBED% (d2 -M; gnuplot uses last block index 8)
+echo [INFO] m setting   : %EMBED% (d2 -M; .h2 blocks follow #dim= for each m; plot uses m=1..3)
 echo [INFO] Per-coin run:
 echo [INFO]   run2 = per-symbol (TAU_D2_^<sym^>, W_D2_^<sym^>)
 
@@ -149,9 +149,10 @@ if errorlevel 1 exit /b 1
 
 >> "%AGG_FILE%" echo !BASE!,!RUN_ID!,!TAU_DELAY!,!THEILER_W!,!OUT_DIR!\!BASE!.h2
 
-echo   [2/2] plot: K2 entropy curves vs ln r for all m...
+REM .h2 col1 = epsilon, col2 = K2 from ln C_m - ln C_{m+1} (same blocks as .d2).
+echo   [2/2] plot: K_2 vs epsilon for m=1..3 ...
 if /i "%HAS_GNUPLOT%"=="true" (
-    "%GNUPLOT_EXE%" -e "set terminal pngcairo size 1400,900 enhanced font 'Arial,12'; set output '!OUT_DIR!\!BASE!_K2_all_m.png'; set logscale x; set grid; set xlabel 'ln r'; set ylabel 'K2 entropy (per delay step)'; set title '!BASE! Correlation Entropy K2 (tau=!TAU_DELAY!, W=!THEILER_W!, m=3)%TEST_SUFFIX%'; set key left top font 'Arial,7' vertical maxrows 30; plot '!OUT_DIR!\!BASE!.h2' index 2 using 1:2 with lines lw 1 title 'm=3'" > "!OUT_DIR!\gnuplot.log" 2>&1
+    "%GNUPLOT_EXE%" -e "set terminal pngcairo size 1400,900 enhanced font 'Arial,12'; set output '!OUT_DIR!\!BASE!_K2_all_m.png'; set logscale x; set grid; set xlabel '{/Symbol epsilon}'; set ylabel 'K_2({/Symbol epsilon})'; set title '!BASE! correlation entropy K_2 vs {/Symbol epsilon} (tau=!TAU_DELAY!, W=!THEILER_W!)%TEST_SUFFIX%'; set key left top font 'Arial,7' vertical maxrows 30; plot for [idx=0:2] '!OUT_DIR!\!BASE!.h2' index idx using 1:2 with lines lw 1 title sprintf('m=%d', idx+1)" > "!OUT_DIR!\gnuplot.log" 2>&1
     "%PYTHON_EXE%" %PYTHON_ARGS% "%PRINT_RESULTS%" file "!OUT_DIR!\!BASE!_K2_all_m.png"
 )
 echo(

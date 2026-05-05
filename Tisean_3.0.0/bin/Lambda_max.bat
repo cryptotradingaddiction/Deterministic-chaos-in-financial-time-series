@@ -153,9 +153,10 @@ if errorlevel 1 exit /b 1
 
 >> "%AGG_FILE%" echo !BASE!,!RUN_ID!,!TAU_DELAY!,!OUT_DIR!\!BASE!_lyap.txt
 
-echo   [2/2] plot: all S^(t^) blocks...
+REM lyap_k writes one block per epsilon scan at fixed dim (#epsilon= ... dim= ...); not one block per m.
+echo   [2/2] plot: S^(t^) for each epsilon block ...
 if /i "%HAS_GNUPLOT%"=="true" (
-    "%GNUPLOT_EXE%" -e "set terminal pngcairo size 1400,900 enhanced font 'Arial,12'; set output '!OUT_DIR!\!BASE!_lyap_St.png'; set title '!BASE! Largest Lyapunov S^(t^) ^(tau=!TAU_DELAY!, m=%M_MIN%..%M_MAX%^)%TEST_SUFFIX%'; set xlabel 't'; set ylabel 'S^(t^)'; set grid; set key outside; plot for [i=0:*] '!OUT_DIR!\!BASE!_lyap.txt' index i using 1:2 with lines lw 0.7 title sprintf('m=%d', i+1)" > "!OUT_DIR!\gnuplot.log" 2>&1
+    "%GNUPLOT_EXE%" -e "set terminal pngcairo size 1400,900 enhanced font 'Arial,12'; set output '!OUT_DIR!\!BASE!_lyap_St.png'; set title '!BASE! Kantz Lyapunov S(t), dim=%M_MIN%, tau=!TAU_DELAY!%TEST_SUFFIX%'; set xlabel 'iteration'; set ylabel 'S(t)'; set grid; set key outside; plot for [i=0:*] '!OUT_DIR!\!BASE!_lyap.txt' index i using 1:2 with lines lw 0.7 title sprintf('{/Symbol epsilon} block %d', i)" > "!OUT_DIR!\gnuplot.log" 2>&1
     "%PYTHON_EXE%" %PYTHON_ARGS% "%PRINT_RESULTS%" file "!OUT_DIR!\!BASE!_lyap_St.png"
 )
 echo(

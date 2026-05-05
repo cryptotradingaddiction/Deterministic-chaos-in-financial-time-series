@@ -153,9 +153,10 @@ if errorlevel 1 exit /b 1
 
 >> "%AGG_FILE%" echo !BASE!,!RUN_ID!,!TAU_DELAY!,!THEILER_W!,!OUT_DIR!\!BASE!.d2
 
-echo   [2/2] plot: D2 vs ln r for all m...
+REM TISEAN d2 .d2 blocks: col1 = scale epsilon, col2 = local D_2 estimate (see MPI PKS d2 docs).
+echo   [2/2] plot: D_2 vs epsilon for m=1..3 ...
 if /i "%HAS_GNUPLOT%"=="true" (
-    "%GNUPLOT_EXE%" -e "set terminal pngcairo size 1400,900 enhanced font 'Arial,12'; set output '!OUT_DIR!\!BASE!_D2_all_m.png'; set logscale x; set grid; set xlabel 'ln r'; set ylabel 'Local slope D2'; set title '!BASE! Correlation Dimension D2 (tau=!TAU_DELAY!, W=!THEILER_W!, m=3)%TEST_SUFFIX%'; set key right bottom font 'Arial,7' vertical maxrows 30; plot '!OUT_DIR!\!BASE!.d2' index 2 using 1:2 with lines lw 1 title 'm=3'" > "!OUT_DIR!\gnuplot.log" 2>&1
+    "%GNUPLOT_EXE%" -e "set terminal pngcairo size 1400,900 enhanced font 'Arial,12'; set output '!OUT_DIR!\!BASE!_D2_all_m.png'; set logscale x; set grid; set xlabel '{/Symbol epsilon}'; set ylabel 'D_2({/Symbol epsilon}, m)'; set title '!BASE! correlation dimension D_2 vs {/Symbol epsilon} (tau=!TAU_DELAY!, W=!THEILER_W!)%TEST_SUFFIX%'; set key right bottom font 'Arial,7' vertical maxrows 30; plot for [idx=0:2] '!OUT_DIR!\!BASE!.d2' index idx using 1:2 with lines lw 1 title sprintf('m=%d', idx+1)" > "!OUT_DIR!\gnuplot.log" 2>&1
     "%PYTHON_EXE%" %PYTHON_ARGS% "%PRINT_RESULTS%" file "!OUT_DIR!\!BASE!_D2_all_m.png"
 )
 echo(

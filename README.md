@@ -8,7 +8,7 @@ This project combines:
 - log-return preprocessing,
 - invariant estimation via TISEAN,
 - recurrence quantification via `PyRQA`,
-- statistical surrogate testing with block permutation, **empirical rank-based p-values** (surrogate literature style), and decision rule (`p < 0.01` by default; see `--alpha`).
+- single-surrogate/reference testing with point-wise shuffle, Gaussian and Student-t reference series, and variance testing where the invariant supplies a valid value vector.
 
 ---
 
@@ -21,7 +21,6 @@ This project combines:
 - [End-to-End Workflow](#end-to-end-workflow)
 - [Distributed Hypothesis Workflow](#distributed-hypothesis-workflow)
 - [Statistical Model (Current, Supervisor-Aligned)](#statistical-model-current-supervisor-aligned)
-- [Minimum p-value vs `B` (large `z_sigma`, still “fail to reject”)](#minimum-p-value-vs-b-large-z_sigma-still-fail-to-reject)
 - [Outputs and Folder Structure](#outputs-and-folder-structure)
 - [How to Read Surrogate Results](#how-to-read-surrogate-results)
 - [Per-Coin Configuration](#per-coin-configuration)
@@ -69,9 +68,9 @@ The hypothesis part is distributed across per-invariant batch scripts and consol
 
 ### Statistical model currently used
 
-- Surrogates: **block permutation surrogates** (not point-wise shuffle).
-- **Inference:** empirical **p-values from ranks/counts** over `B` surrogate metric draws (no Gaussian / Student‑t assumption on the surrogate distribution).
-- **Descriptive only:** `z_sigma = (X_orig - mu_surr) / SD(surr)` (Theiler-style sigma score) and `z_SE = (X_orig - mu_surr) / SE_surr` with `SE_surr = SD(surr)/sqrt(B)` — **they do not define p** (note `z_SE` scales with `B`).
+- Null/reference series: one point-wise random permutation (`randperm`, no blocks), one Gaussian `N(mu_r, sigma_r)` series, and one Student-t series with `df=3.5` scaled to `(mu_r, sigma_r)`.
+- **Inference:** two-sided F-test of equality of invariant variances, original vs shuffled surrogate, where the invariant has a methodologically defined vector of values.
+- Current practical scope: the F-test is defined for **D2/K2**. **LLE** and **RQA** are computed as one scalar on the original series, so their SD/F-test columns are unavailable (`n=1`, `sd=nan`, `insufficient n`).
 - Decision rule: reject `H0` if `p-value < alpha` (default **`alpha = 0.01`** in `hypothesis.py`; override with `--alpha`).
 
 ---
@@ -301,10 +300,10 @@ hypothesis.bat
 
 What happens per symbol:
 
-1. D2 script computes baseline outputs and runs D2-scoped surrogate test.
-2. K2 script computes baseline outputs and runs K2-scoped surrogate test.
-3. LLE script computes baseline outputs and runs LLE-scoped surrogate test.
-4. RQA script computes recurrence outputs, scalar RQA values, and RQA-scoped surrogate test.
+1. D2 script computes baseline outputs and runs D2-scoped single-surrogate/reference recomputation.
+2. K2 script computes baseline outputs and runs K2-scoped single-surrogate/reference recomputation.
+3. LLE script computes baseline outputs and reports the original-series Kantz scalar estimate.
+4. RQA script computes recurrence outputs and scalar RQA values for the original series.
 5. Each script aggregates its own surrogate summaries.
 
 ---
@@ -334,71 +333,33 @@ Each invariant family has different output files, parameterization, and practica
 
 ## Statistical Model (Current, Supervisor-Aligned)
 
-### Null and alternative hypotheses
+### Null/reference series
 
-- `H0`: the series has no global nonlinear deterministic structure beyond local/block-preserved behavior.
-- `HA`: original-series invariant values differ systematically from block-permuted surrogate distribution (evidence of nonlinear deterministic dynamics/chaos).
+For each original log-return series, `hypothesis.py` constructs:
 
-### Surrogate generation
+1. `surr`: one point-wise random permutation of the original observations,
+2. `normal`: one `N(mu_r, sigma_r)` series of the same length,
+3. `t3.5`: one Student-t reference series with `df=3.5`, scaled to the original mean and SD.
 
-Implemented in `surrogate_sampling.py`:
+The permutation keeps the marginal mean/SD identical to the original series but destroys temporal order. The Gaussian and Student-t references are reported as benchmarks, not as the main p-value pair.
 
-1. Split original series into contiguous blocks (`N_blocks`, default `100`).
-2. Randomly permute block indices (`randperm` logic over blocks).
-3. Concatenate shuffled blocks into one surrogate.
-4. Repeat `B` times.
+### Invariant sources and test
 
-This preserves short-range structure inside blocks while destroying global ordering.
-
-### Score computation (empirical p-values)
-
-For each metric, let `T_1 … T_B` be surrogate draws and `T_orig` the original-series metric.
-
-With the `(B+1)` correction:
-
-- **Upper tail** (e.g. **LLE**):  
-  `p = (1 + #{ i : T_i >= T_orig }) / (B + 1)`
-- **Lower tail** (e.g. **D2**, **K2**):  
-  `p = (1 + #{ i : T_i <= T_orig }) / (B + 1)`
-- **Two-sided omnibus** (RQA scalars when direction is not fixed a priori):  
-  `p = min(1, 2 * min(p_upper, p_lower))` with the same `p_upper`, `p_lower` as above.
-
-Tails are set in `METRIC_EMPIRICAL_TAIL` in `hypothesis.py` (edit there if you need metric-specific one- vs two-sided tests).
-
-**Descriptive columns (not used for p):**
+The current statistical test is:
 
 ```text
-z_sigma = (X_orig - mu_surr) / SD(surr)     # Theiler-style; comparable across B
-z_SE    = (X_orig - mu_surr) / SE_surr     # SE_surr = SD(surr)/sqrt(B); depends on B
+H0: Var(T_orig) = Var(T_surr)
 ```
 
-Decision (default): if empirical `p < alpha` -> reject `H0` (default **`alpha = 0.01`**); else fail to reject `H0`. Set e.g. `--alpha 0.05` if you want the older 5% convention.
+using a two-sided F-test at `alpha=0.01` by default. This requires each invariant to provide a vector of methodologically meaningful values. At the current stage:
 
-Optional **`--decision_abs_z_sigma K`** (e.g. `3`): the **`decision` column** uses **`|z_sigma| ≥ K`** instead of the p-value threshold; **p-values in the file are still empirical**.
+- **D2/K2:** vectors are taken from the second column of the `#dim=3` block in TISEAN `.d2` / `.h2` outputs. The reported value is the mean of that vector, `orig_sd` / `surr_sd` are sample SDs, and `n` is the number of epsilon ordinates used.
+- **LLE:** computed as one Kantz estimate from the slope of `S(t)` for `m=3`; `n=1`, so SD/F-test is unavailable.
+- **RQA:** computed once on the full original time series; `n=1`, so SD/F-test is unavailable.
 
-`d2.exe` runs inside `hypothesis.py` with **`-M1,3`**, matching `EMBED=1,3` in `correlation_dimension.bat` / `correlation_entropy.bat`.
+Null/reference invariant recomputation is therefore performed only for **D2/K2**. LLE/RQA null columns remain `nan` by design.
 
-Summary files report `SD(surr)`, `z_sigma`, `z_SE` with **explicit B in the column header** (e.g. `z_SE(B=100)`), **empirical** `p-value`, and the text `decision` per row.
-
-### Replicate count
-
-In `hypothesis.py`, surrogate replicate count **`B`** is **100** in both modes (`TEST_B` and `FULL_B` are both `100`). Test vs full mode mainly affects **series length** (2000 vs complete), not **`B`**. There is **no CLI flag for `B`** yet — raise **`TEST_B`** / **`FULL_B`** in source if you need more surrogates.
-
-**Block structure** (how each surrogate series is built) is separate from **`B`**: override **`--surrogate_blocks`** (default `100` contiguous blocks per surrogate); see `py -3 C:\DCh\hypothesis.py --help`.
-
-<a id="minimum-p-value-vs-b-large-z_sigma-still-fail-to-reject"></a>
-
-### Minimum p-value vs `B` (large `z_sigma`, still “fail to reject”)
-
-With the **two-sided** empirical p-value and the **`(B+1)`** correction documented above, the **smallest** attainable p-value is **on the order of `2 / (B + 1)`** when the original ranks at the most extreme positions in **both** tails. For the default **`B = 100`**, that floor is **`2 / 101 ≈ 0.0198`**.
-
-Implications:
-
-- At the default decision rule **`alpha = 0.01`**, you **cannot** reject **`H0`** when **`p` is stuck at that floor — **`0.0198 > 0.01`** — even if the original is as extreme as the ranking allows. The **`decision`** column is driven by **`p < alpha`**, not by the magnitude of **`z_sigma`** (unless you use **`--decision_abs_z_sigma`**).
-- **`z_sigma`** can still be **very large**: it divides by **`SD(surr)`**, which may be tiny if surrogate values are tightly clustered. That does **not** automatically imply **`p < 0.01`** with **`B = 100`**.
-- Column **`rej_all`** in `print_results.py boot_aggregate` stays **`NO`** if **any** metric in scope fails to reject (e.g. **`MAXLINE`** often has **`p = 1`** when the original equals the surrogate cloud under the chosen embedding).
-
-**What to do:** increase **`B`** (edit **`TEST_B`** / **`FULL_B`** in `hypothesis.py`) into the **hundreds or low thousands** if you need **`p`-values that can fall below 0.01**, or temporarily use **`--alpha 0.05`** if a **5%** threshold matches your reporting convention.
+`d2.exe` currently runs with `-M1,3`, matching `EMBED=1,3` in `correlation_dimension.bat` / `correlation_entropy.bat`. A pending methodological refinement is to replace the current full-`#dim=3` D2/K2 aggregation with an explicit scaling/plato-window selection and optionally add Takens' estimator from `.c2` / `c2t`.
 
 ---
 
@@ -442,27 +403,22 @@ No active `_bootstrap_summary.txt` naming should be used.
 
 In each `<BASE>_surrogate_summary.txt`, key columns are:
 
-- `orig_mean` - metric value on the original series (compact aggregate tables use headers like `D2_orig_mean`),
-- `std_orig` - sample SD of ordinates in the **same plateau window** used for `orig_mean` (**D2**/**K2** only; **`nan`** for **LLE** and **RQA** scalars),
-- `Mean(surr)` - average across surrogates,
-- `SD(surr)` - sample SD across surrogates,
-- `SE(surr)` - **standard error of** `Mean(surr)`: `SD(surr) / √B` (same quantity as the denominator of `z_SE` when `z_SE = (orig_mean − Mean(surr)) / SE(surr)`),
-- `z_sigma` - `(orig_mean − Mean(surr)) / SD(surr)` (Theiler-style; descriptive),
-- `z_SE(B=<run>)` - column header prints the actual replicate count (e.g. `z_SE(B=100)`). Statistic: `(orig_mean − Mean(surr)) / SE(surr)` with `SE(surr) = SD(surr)/√B` (descriptive; **not comparable across different B** without rescaling),
-- `p-value` - **empirical** p-value from surrogate rank counts (see [Statistical Model](#statistical-model-current-supervisor-aligned)),
-- `decision` - per-metric `reject H0` / `fail to reject H0` (and `insufficient data` if applicable).
+- `orig` - invariant value on the original series,
+- `orig_sd` - sample SD of invariant values where defined (`D2` / `K2`; `nan` for scalar LLE/RQA),
+- `surr` - invariant value on the single shuffled surrogate where recomputed,
+- `surr_sd` - sample SD of shuffled-surrogate invariant values where defined,
+- `normal`, `t3.5` - reference invariant values where recomputed,
+- `n` - number of invariant ordinates used for the original series (`D2/K2`: epsilon ordinates in `#dim=3`; `LLE/RQA`: `1`),
+- `F`, `p-value` - two-sided F-test of equality of variances, original vs shuffled surrogate, available only when both sides have `n >= 2` and positive SD,
+- `decision` - per-metric `reject H0`, `fail to reject H0`, `insufficient n`, or `no sd`.
 
 Interpretation:
 
 - `p-value < alpha` (default **0.01**): reject `H0` for that metric,
 - otherwise: fail to reject `H0`,
-- `nan` / `insufficient data`: insufficient stable values.
+- `nan` / `insufficient n`: no variance test is defined for the available scalar output.
 
-When ``print_results.py boot_aggregate`` builds the compact table, column **`rej_all`** is **YES** only if **every metric present** in that summary rejects `H0` at the run alpha (default **0.01**):
-
-- **DKL scope** (summary includes ``D2``, ``K2``, ``LLE``): YES iff all three reject.
-- **RQA-only scope** (metrics are only ``RR``, ``DET``, …): YES iff each listed RQA metric rejects.
-- Otherwise **`—`**. PyRQA rows show **`—`** in **`std_orig`** (single scalar per series; no plateau SD).
+When `print_results.py boot_aggregate` builds the compact table, column **`rej_all`** is **YES** only if every metric present in that summary rejects `H0` at the run alpha. For scalar LLE/RQA summaries this will normally be **NO** because the variance test is unavailable.
 
 ---
 
@@ -492,7 +448,7 @@ Operational notes:
 
 - `crypto_data_all.py` - download market data.
 - `compute_logreturns.py` - build log-return datasets.
-- `hypothesis.py` - surrogate generation + metric recomputation + `z_sigma` + p-value inference.
+- `hypothesis.py` - null/reference series generation, metric recomputation, and F-test variance inference where defined.
 - `print_results.py` - parse/print/aggregate outputs and surrogate summaries.
 
 ### Batch orchestrators
@@ -774,7 +730,7 @@ General conventions (`-l`, `-x`, `-c`, `-d`, `-m`/`-M`, `-t`, `-r`/`-R`, …) ar
 **This repository’s `Lambda_max.bat` line** uses:
 
 ```text
-lyap_k.exe -d<tau> -m3 -M3 -r0.0005 -R0.05 -n500 -o "<OUT>\<BASE>_lyap.txt" "<DATA.dat>"
+lyap_k.exe -d<tau> -m3 -M3 -n500 -o "<OUT>\<BASE>_lyap.txt" "<DATA.dat>"
 ```
 
 Interpretation:
@@ -782,8 +738,9 @@ Interpretation:
 - **Embedding dimension is fixed at m = 3** (`-m3 -M3`).
 - **`-n500` sets 500 reference points**, not the number of time steps (`-s`). The batch variable name `STEPS` is misleading; time depth follows `-s` (default **50** if you do not pass `-s`).
 - **`-t` is not passed** to `lyap_k.exe` here → Theiler exclusion inside `lyap_k` defaults to **0**. **`hypothesis.py`** also calls `lyap_k` **without** `-t` (see `run_lyap_k`); `--theiler` from `W_D2_<sym>` is applied to **`d2`** and **PyRQA**, not to Kantz `lyap_k`. To align Lyapunov with the same temporal decorrelation as `d2`, add `-t<W>` consistently to both the BAT and `run_lyap_k`.
-- Neighbourhood search uses **[0.0005, 0.05]** in raw series units (typical for normalized or small-magnitude log-return data).
-- **Gnuplot (`Lambda_max.bat`):** each output **block** is one **ε-scan** at fixed embedding dimension (`#epsilon= … dim= …`). Legends label **ε blocks**, not different **m** (when `m_min=m_max`, several blocks are repeats over length scales).
+- Neighbourhood search uses **TISEAN defaults** for `-r` and `-R` (because the flags are omitted): approximately data interval / 1000 and data interval / 100.
+- **Gnuplot (`Lambda_max.bat`):** each output **block** is one **ε-scan** at fixed embedding dimension (`#epsilon= … dim= …`). Legends label **ε blocks**, not different **m**.
+- **Hypothesis recomputation:** LLE is treated as one Kantz estimate from the slope of the linear part of `S(t)` for `m=3` (same convention as `print_results.py`, slope on iterations 2..10 of the first `m=3` epsilon block), so LLE has `n=1` and no SD/F-test.
 
 For comparison, **Rosenstein’s method** is `lyap_r` (not used in this repo); see [lyap_r](https://www.pks.mpg.de/tisean/Tisean_3.0.1/docs/docs_c/lyap_r.html).
 
@@ -851,12 +808,12 @@ d2.exe -d<tau> -M1,3 -t<W> -o "<OUT>\<BASE>" "<DATA.dat>"
 **Lambda / LLE** (`Lambda_max.bat`):
 
 ```text
-lyap_k.exe -d<tau> -m3 -M3 -r0.0005 -R0.05 -n500 -o "<OUT>\<BASE>_lyap.txt" "<DATA.dat>"
+lyap_k.exe -d<tau> -m3 -M3 -n500 -o "<OUT>\<BASE>_lyap.txt" "<DATA.dat>"
 ```
 
 - Embedding fixed to **m = 3** (`M_MIN=M_MAX=3`).
-- Neighbourhood radii bracket `[r,R]=[0.0005, 0.05]`; **`-n500` = 500 reference orbit points** (see `lyap_k` table above). Time iterations default to `-s` unless you add it to the BAT.
-- Hypothesis call uses `tau = TAU_LLE_<sym>` and **Theiler** `W = W_D2_<sym>` (same W table as D2) when Python recomputes LLE on originals/surrogates.
+- Neighbourhood radii use **TISEAN defaults** for `-r` and `-R`; **`-n500` = 500 reference orbit points** (see `lyap_k` table above). Time iterations default to `-s` unless you add it to the BAT.
+- Hypothesis call uses `tau = TAU_LLE_<sym>` when Python recomputes LLE on originals/surrogates. The reported LLE is one slope estimate from `S(t)`, not an average over epsilon blocks; therefore the SD/F-test columns are unavailable for LLE (`n=1`).
 
 **Recurrence** (`RQA.bat`):
 
@@ -867,7 +824,7 @@ recurr.exe -m1,3 -d<tau> -r<radius> -%%2 -o "<OUT>\<BASE>_recurr.txt" "<DATA.dat
 (See [Why `recurr` uses `-%%2`](#recurr-batch-percent-flag): batch **`%%`** emits one **`%`**, then **`2`** → TISEAN’s **2%** subsampling.)
 
 - `-m1,3` ⇒ **1** component, embedding **m = 3**.
-- `tau = TAU_RQA_<sym>`, `r = RAD_RQA_<sym>`.
+- `tau = TAU_RQA_<sym>`, `r = RAD_RQA_<sym>`; current configured radius is **0.005** for each coin.
 
 ### Supporting tooling
 

@@ -104,9 +104,7 @@ for %%F in (%FILES%) do (
     set "HYP_DIR=!RUN2_DIR!\hypothesis_d2"
     if not exist "!HYP_DIR!" mkdir "!HYP_DIR!"
     echo   [Hypothesis] D2-only surrogate test ^(tau=!COIN_TAU!, W=!COIN_W!^)
-    set "HYP_ZSIG="
-    if defined DCH_DECISION_ABS_Z_SIGMA set "HYP_ZSIG=--decision_abs_z_sigma !DCH_DECISION_ABS_Z_SIGMA!"
-    "%PYTHON_EXE%" %PYTHON_ARGS% "C:\DCh\hypothesis.py" --input "!DATA_FILE!" --base "!BASE!" --delay !COIN_TAU! --theiler !COIN_W! --output_dir "!HYP_DIR!" --test_mode "%TEST_MODE%" --metrics_list "D2" !HYP_ZSIG!
+    "%PYTHON_EXE%" %PYTHON_ARGS% "C:\DCh\hypothesis.py" --input "!DATA_FILE!" --base "!BASE!" --delay !COIN_TAU! --theiler !COIN_W! --output_dir "!HYP_DIR!" --test_mode "%TEST_MODE%" --metrics_list "D2"
     if errorlevel 1 exit /b 1
     "%PYTHON_EXE%" %PYTHON_ARGS% "%PRINT_RESULTS%" boot "!HYP_DIR!\!BASE!_surrogate_summary.txt"
 )

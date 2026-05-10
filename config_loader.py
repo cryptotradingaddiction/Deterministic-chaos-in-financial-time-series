@@ -122,7 +122,7 @@ def rqa_params_for_symbol(symbol: str, settings_flat=None):
         return sk.get(name.upper(), default)
 
     tau = int(float(_get(f"TAU_RQA_{symbol}", "3")))
-    rad = float(_get(f"RAD_RQA_{symbol}", "0.01"))
+    rad = float(_get(f"RAD_RQA_{symbol}", "0.005"))
     theiler_w = int(float(_get(f"W_D2_{symbol}", "0")))
     return tau, rad, theiler_w
 

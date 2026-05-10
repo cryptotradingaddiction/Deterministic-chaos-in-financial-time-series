@@ -47,8 +47,6 @@ def run_kantz_lyap_k(data_1d: np.ndarray, m: int, tau: int, out_txt: str) -> Non
             f"-d{tau}",
             f"-m{m}",
             f"-M{m}",
-            "-r0.0005",
-            "-R0.05",
             "-#5",
             "-n",
             "500",

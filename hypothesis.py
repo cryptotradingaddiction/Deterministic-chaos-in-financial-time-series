@@ -1,22 +1,21 @@
 #!/usr/bin/env python3
 """
-Permutation-surrogate hypothesis testing for dynamical invariants (D2, K2, LLE, RQA).
+Surrogate hypothesis testing for dynamical invariants (D2, K2, LLE, RQA).
 
 Workflow:
-    1. Block-shuffle the observed series B times to obtain surrogate time series of the
-       same length (see ``surrogate_sampling.generate_permuted_samples``).
-    2. For each replicate, run the same metric pipeline as for the original data
-       (TISEAN ``d2``/``h2``, ``lyap_k``, PyRQA) inside ``process_single_bootstrap``.
-    3. Compare each original scalar metric to the empirical distribution of surrogate
-       values using rank-based p-values (+1/(B+1) correction) and tail rules in
-       ``METRIC_EMPIRICAL_TAIL``. ``z_sigma`` / ``z_SE`` are descriptive Theiler-style
-       summaries; significance defaults to empirical p < alpha (see ``--alpha``).
-
-Heavy lifting is parallelised with ``ProcessPoolExecutor`` because each replicate runs
-external binaries and/or PyRQA.
+    1. Generate ONE surrogate by random permutation (randperm) of the observed series.
+       No block structure — individual elements shuffled.
+    2. Generate two reference series of the same length using mu/sigma estimated from
+       the original log-returns: Normal N(mu, sigma) and scaled t(df=3.5).
+    3. Run all requested metrics on the original series. For null/reference series
+       (surrogate, normal, t), run only metrics with a defined variance test (D2/K2).
+    4. Where an invariant has multiple methodologically defined values, test
+       equality of invariant SD/variance between original and one shuffled surrogate.
+       D2/K2 use all values from the #dim=3 block; LLE and RQA use one value
+       computed from the full time series.
+    5. Report invariant values and series mu/sigma for all four series.
 """
 import argparse
-import concurrent.futures
 import glob
 import logging
 import os
@@ -25,6 +24,7 @@ import subprocess
 import warnings
 
 import numpy as np
+from scipy import stats as scipy_stats
 from pyrqa.analysis_type import Classic
 from pyrqa.computation import RQAComputation
 from pyrqa.metric import EuclideanMetric
@@ -35,71 +35,97 @@ from pyrqa.time_series import TimeSeries
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 warnings.filterwarnings("ignore", category=UserWarning)
 
-from surrogate_sampling import generate_permuted_samples, load_series_1d
+from surrogate_sampling import load_series_1d
 
 logger = logging.getLogger(__name__)
 
-# Surrogate replicate count: kept equal for TEST vs FULL here; series length differs via CLI/test_mode instead.
-FULL_B = 100
-TEST_B = 100
-# Default significance level for empirical p-value decisions (reject H0 if p < ALPHA).
+# Default significance level
 DEFAULT_ALPHA = 0.01
-# Must match `EMBED` max in `correlation_dimension.bat` / `correlation_entropy.bat` (`-M1,3` → m≤3).
+# Degrees of freedom for t-distribution reference series
+T_DOF = 3.5
+# Must match -M1,3 in correlation_dimension.bat / correlation_entropy.bat
 M_D2 = 3
-# lyap_k forward horizon (embedding trajectory length cap); large enough for stable slope estimate.
-M_LYAP = 100
-# Default PyRQA recurrence radius (same units as the embedded scalar series). Override with ``--rqa_radius``
-# so surrogate tests match ``RAD_RQA_<sym>`` / ``recurr.exe -r`` in ``RQA.bat``.
-DEFAULT_RQA_RADIUS = 0.01
-# Takens delay embedding dimension for RQA (must stay aligned with ``RQA.bat`` / thesis settings).
+M_LYAP = 3
+DEFAULT_RQA_RADIUS = 0.005
 RQA_EMBEDDING_DIM = 3
 
 RQA_KEYS = ("RR", "DET", "LAM", "MAXLINE", "ENTR", "TT")
-
-METRICS_SCOPE_FULL = "full"
-METRICS_SCOPE_D2_K2_LLE_RQA = "d2_k2_lle_rqa"
 ALL_METRICS = ("D2", "K2", "LLE", *RQA_KEYS)
+NULL_SERIES_METRICS = {"D2", "K2"}
 
-
-def metric_names_for_scope(_metrics_scope=None):
-    """Default metric set for full-scope runs (argument kept for call-site compatibility)."""
-    return ["D2", "K2", "LLE", *RQA_KEYS]
-
-
-def parse_metrics_list(raw_metrics):
-    """Normalise ``--metrics_list`` input: uppercase tokens, dedupe, validate against ``ALL_METRICS``."""
-    tokens = [t.strip().upper() for t in str(raw_metrics).split(",") if t.strip()]
-    if not tokens:
-        raise ValueError("metrics list is empty")
-    invalid = [t for t in tokens if t not in ALL_METRICS]
-    if invalid:
-        raise ValueError(f"unknown metric(s): {', '.join(invalid)}")
-    return list(dict.fromkeys(tokens))
-
-
-# Predictability time T = (1/lambda) * log(L / EPS) when lambda > 0.
-# Same constants as predictability.py.
 PRED_EPSILON = 1e-5
 PRED_TOLERANCE = 1e-2
 
 
-def is_test_mode(value):
-    """Truthy strings for ``--test_mode`` (typically truncates series length in calling batches)."""
-    return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
+# ---------------------------------------------------------------------------
+# Surrogate and reference series generation
+# ---------------------------------------------------------------------------
 
+def generate_single_surrogate(data: np.ndarray) -> np.ndarray:
+    """Random permutation of original series (randperm, no blocking)."""
+    return np.random.permutation(data)
+
+
+def generate_normal_series(mu: float, sigma: float, n: int) -> np.ndarray:
+    """N(mu, sigma) series of length n."""
+    return np.random.normal(mu, sigma, n)
+
+
+def generate_t_series(mu: float, sigma: float, n: int, dof: float = T_DOF) -> np.ndarray:
+    """t(dof) series scaled to (mu, sigma).
+
+    t(dof) has zero mean and variance dof/(dof-2) for dof>2, so
+    scale raw draws by sigma / sqrt(dof/(dof-2)) and shift by mu.
+    """
+    t_raw = np.random.standard_t(dof, n)
+    t_sd = np.sqrt(dof / (dof - 2.0))
+    return mu + sigma * (t_raw / t_sd)
+
+
+# ---------------------------------------------------------------------------
+# Hypothesis test: equality of invariant SD/variance
+# ---------------------------------------------------------------------------
+
+def invariant_sd_f_test(
+    sd_orig: float,
+    n_orig: int,
+    sd_surr: float,
+    n_surr: int,
+    alpha: float = DEFAULT_ALPHA,
+) -> tuple[float, float, str]:
+    """Two-sided F-test of H0: Var(T_orig) == Var(T_surr)."""
+    if n_orig < 2 or n_surr < 2:
+        return np.nan, np.nan, "insufficient n"
+    if not (np.isfinite(sd_orig) and np.isfinite(sd_surr) and sd_orig > 0 and sd_surr > 0):
+        return np.nan, np.nan, "no sd"
+
+    f_stat = float((sd_orig * sd_orig) / (sd_surr * sd_surr))
+    df1, df2 = n_orig - 1, n_surr - 1
+    lower_tail = float(scipy_stats.f.cdf(f_stat, df1, df2))
+    upper_tail = float(scipy_stats.f.sf(f_stat, df1, df2))
+    p = min(1.0, 2.0 * min(lower_tail, upper_tail))
+    decision = "reject H0" if (np.isfinite(p) and p < alpha) else "fail to reject H0"
+    return f_stat, p, decision
+
+
+# ---------------------------------------------------------------------------
+# TISEAN / RQA wrappers (unchanged from original)
+# ---------------------------------------------------------------------------
 
 def load_data(filename):
     return load_series_1d(filename)
 
 
 def resolve_tool(tool_name):
-    """Resolve a TISEAN executable: ``TISEAN_BIN`` env, repo ``Tisean_3.0.0/bin``, then PATH."""
     from_env = os.environ.get("TISEAN_BIN")
     if from_env:
         candidate = os.path.join(from_env, f"{tool_name}.exe")
         if os.path.exists(candidate):
             return candidate
-    local_bin = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Tisean_3.0.0", "bin", f"{tool_name}.exe")
+    local_bin = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "Tisean_3.0.0", "bin", f"{tool_name}.exe",
+    )
     if os.path.exists(local_bin):
         return local_bin
     which = shutil.which(tool_name)
@@ -112,241 +138,137 @@ def resolve_tool(tool_name):
 
 
 def run_d2(data_file, delay, theiler, output_prefix):
-    """Grassberger–Procaccia correlation integral; writes ``<prefix>.d2`` and ``.h2``."""
-    cmd = [
-        resolve_tool("d2"),
-        f"-d{delay}",
-        f"-M1,{M_D2}",
-        f"-t{theiler}",
-        "-o",
-        output_prefix,
-        data_file,
-    ]
+    cmd = [resolve_tool("d2"), f"-d{delay}", f"-M1,{M_D2}", f"-t{theiler}",
+           "-o", output_prefix, data_file]
     subprocess.run(cmd, check=True, capture_output=True, text=True)
     return output_prefix + ".d2", output_prefix + ".h2"
 
 
-def run_c2t(c2_file, output_file):
-    """TISEAN c2t is FORTRAN with character*72 file path truncation, so
-    invoke it from c2_file's directory using short relative names."""
-    work_dir = os.path.dirname(os.path.abspath(c2_file)) or "."
-    rel_in = os.path.basename(c2_file)
-    rel_out = os.path.relpath(os.path.abspath(output_file), work_dir)
-    cmd = [resolve_tool("c2t"), "-o", rel_out, rel_in]
-    subprocess.run(cmd, check=True, capture_output=True, text=True, cwd=work_dir)
-
-
 def run_lyap_k(data_file, delay, output_file):
-    """Kantz algorithm largest Lyapunov exponent; neighbourhood bracket fixed for log-return scale."""
-    cmd = [
-        resolve_tool("lyap_k"),
-        f"-d{delay}",
-        "-m1",
-        f"-M{M_LYAP}",
-        "-r0.0005",
-        "-R0.05",
-        "-n",
-        "500",
-        "-o",
-        output_file,
-        data_file,
-    ]
+    cmd = [resolve_tool("lyap_k"), f"-d{delay}", f"-m{M_LYAP}", f"-M{M_LYAP}",
+           "-n", "500", "-o", output_file, data_file]
     subprocess.run(cmd, check=True, capture_output=True, text=True)
 
 
-def run_c1(data_file, delay, theiler, output_prefix):
-    """FORTRAN tool: cwd into the output prefix's parent and use a short -o name."""
-    work_dir = os.path.dirname(os.path.abspath(output_prefix)) or "."
-    rel_prefix = os.path.basename(output_prefix)
-    rel_data = os.path.relpath(os.path.abspath(data_file), work_dir)
-    cmd = [
-        resolve_tool("c1"),
-        f"-d{delay}",
-        "-m2",
-        "-M30",
-        f"-t{theiler}",
-        "-n500",
-        "-o",
-        rel_prefix,
-        rel_data,
-    ]
-    subprocess.run(cmd, check=True, capture_output=True, text=True, cwd=work_dir)
-
-
-def run_c2d(c1_source_file, output_file):
-    """FORTRAN tool: cwd into source's directory, use short relative names."""
-    work_dir = os.path.dirname(os.path.abspath(c1_source_file)) or "."
-    rel_in = os.path.basename(c1_source_file)
-    cmd = [resolve_tool("c2d"), "-a2", rel_in]
-    with open(output_file, "w", encoding="utf-8") as out:
-        subprocess.run(cmd, check=True, stdout=out, stderr=subprocess.PIPE, text=True, cwd=work_dir)
-
-
-def run_boxcount(data_file, delay, output_file):
-    primary = [
-        resolve_tool("boxcount"),
-        f"-d{delay}",
-        "-M30",
-        "-Q1.0",
-        "-#20",
-        "-o",
-        output_file,
-        data_file,
-    ]
+def extract_dim_values(path, dim=M_D2, value_column_idx=1):
+    """Read values from a specific TISEAN #dim block."""
+    values = []
+    current_dim = None
     try:
-        subprocess.run(primary, check=True, capture_output=True, text=True)
-    except subprocess.CalledProcessError:
-        # Older TISEAN builds accept ``-M1,max`` instead of single-index ``-Mmax``.
-        fallback = [
-            resolve_tool("boxcount"),
-            f"-d{delay}",
-            "-M1,30",
-            "-Q1.0",
-            "-#20",
-            "-o",
-            output_file,
-            data_file,
-        ]
-        subprocess.run(fallback, check=True, capture_output=True, text=True)
+        with open(path, "r", encoding="utf-8", errors="ignore") as handle:
+            for line in handle:
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                if stripped.startswith("#dim="):
+                    try:
+                        current_dim = int(stripped.split("=")[1].strip())
+                    except (ValueError, IndexError):
+                        current_dim = None
+                    continue
+                if stripped.startswith("#") or stripped.startswith("!"):
+                    continue
+                if current_dim != dim:
+                    continue
+                parts = stripped.split()
+                if len(parts) <= value_column_idx:
+                    continue
+                try:
+                    values.append(float(parts[value_column_idx]))
+                except ValueError:
+                    continue
+    except Exception:
+        return np.array([], dtype=float)
+    return np.array(values, dtype=float)
+
+
+def _mean_sd_n(values):
+    values = np.asarray(values, dtype=float)
+    values = values[np.isfinite(values)]
+    if values.size == 0:
+        return np.nan, np.nan, 0
+    mean = float(np.mean(values))
+    sd = float(np.std(values, ddof=1)) if values.size > 1 else np.nan
+    return mean, sd, int(values.size)
 
 
 def extract_d2_mean_std(d2_file):
-    """Plateau-window mean and sample SD of local D2 slopes (same window as extract_d2 mean).
-
-    ``np.loadtxt`` collapses TISEAN comment blocks; column 1 holds local dimension slopes vs ln r.
-    The central 50% of points (25–75% index range) approximates a scaling plateau for reporting.
-    """
-    try:
-        data = np.loadtxt(d2_file)
-        if data.size == 0 or data.ndim < 2:
-            return np.nan, np.nan
-        slopes = data[:, 1]
-        n = len(slopes)
-        low, high = int(0.25 * n), int(0.75 * n)
-        if low >= high:
-            return np.nan, np.nan
-        w = slopes[low:high]
-        mu = float(np.mean(w))
-        sg = float(np.std(w, ddof=1)) if len(w) > 1 else np.nan
-        return mu, sg
-    except Exception:
-        return np.nan, np.nan
-
-
-def extract_d2(d2_file):
-    mu, _ = extract_d2_mean_std(d2_file)
-    return mu
+    """Mean/SD of local D2 slopes from the full #dim=3 block."""
+    return _mean_sd_n(extract_dim_values(d2_file, dim=M_D2, value_column_idx=1))
 
 
 def extract_k2_mean_std(h2_file):
-    """Plateau-window mean and sample SD of K2 curve ordinates (same window as extract_k2 mean)."""
+    """Mean/SD of K2 ordinates from the full #dim=3 block."""
+    return _mean_sd_n(extract_dim_values(h2_file, dim=M_D2, value_column_idx=1))
+
+
+def _slope_fit(x, y, lo=2, hi=10):
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    n = min(len(x), len(y))
+    lo = min(lo, max(0, n - 3))
+    hi = min(hi, n)
+    if hi - lo < 2:
+        return np.nan
     try:
-        data = np.loadtxt(h2_file)
-        if data.size == 0 or data.ndim < 2:
-            return np.nan, np.nan
-        k2_vals = data[:, 1]
-        n = len(k2_vals)
-        low, high = int(0.25 * n), int(0.75 * n)
-        if low >= high:
-            return np.nan, np.nan
-        w = k2_vals[low:high]
-        mu = float(np.mean(w))
-        sg = float(np.std(w, ddof=1)) if len(w) > 1 else np.nan
-        return mu, sg
-    except Exception:
-        return np.nan, np.nan
-
-
-def extract_k2(h2_file):
-    mu, _ = extract_k2_mean_std(h2_file)
-    return mu
-
-
-def extract_lle(lyap_file):
-    """Parse lyap_k text output: take the last epsilon block, linear fit on first ~20% of iterates."""
-    try:
-        with open(lyap_file, "r", encoding="utf-8", errors="ignore") as handle:
-            lines = handle.readlines()
-        blocks = []
-        current_block = []
-        for line in lines:
-            if line.startswith("#") or line.strip() == "":
-                continue
-            if "epsilon" in line:
-                if current_block:
-                    blocks.append(np.array(current_block))
-                    current_block = []
-            else:
-                parts = line.split()
-                if len(parts) >= 2:
-                    current_block.append([float(parts[0]), float(parts[1])])
-        if current_block:
-            blocks.append(np.array(current_block))
-        if not blocks:
-            return np.nan
-        data = blocks[-1]
-        if data.size == 0 or data.ndim < 2:
-            return np.nan
-        t, s = data[:, 0], data[:, 1]
-        if len(t) < 2:
-            return np.nan
-        n_fit = max(5, int(0.2 * len(t)))
-        slope, _ = np.polyfit(t[:n_fit], s[:n_fit], 1)
+        slope, _ = np.polyfit(x[lo:hi], y[lo:hi], 1)
         return float(slope)
     except Exception:
         return np.nan
 
 
-def extract_middle_window_from_text(file_path, value_column_idx=1):
-    """Generic plateau reader: numeric column ``value_column_idx``, mean of middle 50% of rows."""
-    values = []
+def extract_lle_mean_std(lyap_file):
+    """Largest Lyapunov estimate: slope of S(t) for the first m=3 epsilon block."""
     try:
-        with open(file_path, "r", encoding="utf-8", errors="ignore") as handle:
-            for line in handle:
-                stripped = line.strip()
-                if not stripped or stripped.startswith("#"):
-                    continue
-                parts = stripped.split()
-                if len(parts) > value_column_idx:
-                    try:
-                        values.append(float(parts[value_column_idx]))
-                    except ValueError:
-                        continue
-        if not values:
-            return np.nan
-        arr = np.array(values, dtype=float)
-        n = len(arr)
-        low, high = int(0.25 * n), int(0.75 * n)
-        if low >= high:
-            return np.nan
-        return float(np.mean(arr[low:high]))
+        with open(lyap_file, "r", encoding="utf-8", errors="ignore") as handle:
+            lines = handle.readlines()
+        first_block = None
+        current_block = []
+        current_dim = None
+        for line in lines:
+            stripped = line.strip()
+            if stripped.startswith("#epsilon"):
+                if current_dim == M_LYAP and current_block:
+                    first_block = np.array(current_block, dtype=float)
+                    break
+                current_dim = None
+                current_block = []
+                tokens = stripped.replace("=", " ").split()
+                for idx, token in enumerate(tokens):
+                    if token.lower() == "dim" and idx + 1 < len(tokens):
+                        try:
+                            current_dim = int(float(tokens[idx + 1]))
+                        except ValueError:
+                            current_dim = None
+                        break
+                continue
+            if stripped.startswith("#") or stripped == "":
+                continue
+            if current_dim != M_LYAP:
+                continue
+            parts = stripped.split()
+            if len(parts) >= 2:
+                current_block.append([float(parts[0]), float(parts[1])])
+        if first_block is None and current_dim == M_LYAP and current_block:
+            first_block = np.array(current_block, dtype=float)
+        if first_block is None or first_block.size == 0 or first_block.ndim < 2:
+            return np.nan, np.nan, 0
+        slope = _slope_fit(first_block[:, 0], first_block[:, 1], lo=2, hi=10)
+        if not np.isfinite(slope):
+            return np.nan, np.nan, 0
+        return slope, np.nan, 1
     except Exception:
-        return np.nan
+        return np.nan, np.nan, 0
 
 
-def extract_d1(d1_file):
-    return extract_middle_window_from_text(d1_file, value_column_idx=1)
-
-
-def extract_k1(box_file):
-    return extract_middle_window_from_text(box_file, value_column_idx=1)
-
-
-def compute_pyrqa_metrics(series, delay, theiler, radius: float | None = None):
-    """Scalar RQA statistics via PyRQA (Classic RQA, Euclidean, fixed-radius neighbourhood).
-
-    ``radius`` must match the recurrence-scale used elsewhere (``recurr -r``, ``rqa_values.py``).
-    """
+def compute_pyrqa_metrics(series, delay, theiler, radius=None):
     r_eff = float(DEFAULT_RQA_RADIUS if radius is None else radius)
     try:
         ts = TimeSeries(series, embedding_dimension=RQA_EMBEDDING_DIM, time_delay=delay)
-        settings = Settings(
-            ts,
-            analysis_type=Classic,
-            neighbourhood=FixedRadius(r_eff),
-            similarity_measure=EuclideanMetric,
-            theiler_corrector=theiler,
-        )
+        settings = Settings(ts, analysis_type=Classic,
+                            neighbourhood=FixedRadius(r_eff),
+                            similarity_measure=EuclideanMetric,
+                            theiler_corrector=theiler)
         computation = RQAComputation.create(settings, verbose=False)
         result = computation.run()
         result.min_diagonal_line_length = 2
@@ -363,209 +285,98 @@ def compute_pyrqa_metrics(series, delay, theiler, radius: float | None = None):
         return {k: np.nan for k in RQA_KEYS}
 
 
-def compute_original_invariants(
-    orig_file,
-    output_dir,
-    base,
-    delay,
-    theiler,
-    metric_names=None,
-    rqa_radius: float | None = None,
-):
-    metric_names = list(ALL_METRICS) if not metric_names else list(metric_names)
+def compute_invariants(series_array, output_dir, label, delay, theiler,
+                       metric_names, rqa_radius=None, series_std_fallback=np.nan):
+    """Compute invariants for an in-memory series. Returns (mean_dict, sd_dict, n_dict).
+
+    SD/N sources:
+      D2/K2 — all second-column values in #dim=3 block
+      LLE   — one slope from the linear part of S(t) for m=3
+      RQA   — one metric value computed on the full time series
+    """
+    metric_names = list(metric_names)
     need_d2 = "D2" in metric_names
     need_k2 = "K2" in metric_names
     need_lle = "LLE" in metric_names
     need_rqa = any(k in metric_names for k in RQA_KEYS)
 
-    prefix = os.path.join(output_dir, f"{base}_orig")
+    prefix = os.path.join(output_dir, label)
+    data_file = prefix + ".dat"
+    np.savetxt(data_file, series_array)
+
     out = {k: np.nan for k in metric_names}
     out_std = {k: np.nan for k in metric_names}
-    d2_file = h2_file = None
-    if need_d2 or need_k2:
-        d2_file, h2_file = run_d2(orig_file, delay, theiler, prefix)
-    if need_d2 and d2_file:
-        mu, sg = extract_d2_mean_std(d2_file)
-        out["D2"] = mu
-        out_std["D2"] = sg
-    if need_k2 and h2_file:
-        mu, sg = extract_k2_mean_std(h2_file)
-        out["K2"] = mu
-        out_std["K2"] = sg
-    if need_lle:
-        lyap_file = prefix + "_lyap.txt"
-        run_lyap_k(orig_file, delay, lyap_file)
-        out["LLE"] = extract_lle(lyap_file)
-    if need_rqa:
-        original_series = load_data(orig_file)
-        rqa_metrics = compute_pyrqa_metrics(original_series, delay, theiler, rqa_radius)
-        for k in RQA_KEYS:
-            if k in out:
-                out[k] = rqa_metrics.get(k, np.nan)
-    return out, out_std
+    out_n = {k: 0 for k in metric_names}
 
-
-def process_single_bootstrap(args_tuple):
-    """Worker: materialise one surrogate sample as ``.dat``, run the metric stack, delete temps.
-
-    Must remain top-level for pickling under ``ProcessPoolExecutor``. Returns a dict with index ``i``
-    and one float per requested metric (NaNs on tool failure).
-    """
-    i, sample, tmp_dir, delay, theiler, metric_names, rqa_radius = args_tuple
-    if not metric_names:
-        metric_names = list(ALL_METRICS)
-    need_d2 = "D2" in metric_names
-    need_k2 = "K2" in metric_names
-    need_lle = "LLE" in metric_names
-    need_rqa = any(k in metric_names for k in RQA_KEYS)
-    sample_file = os.path.join(tmp_dir, f"perm_{i:04d}.dat")
-    np.savetxt(sample_file, sample)
-    prefix = os.path.join(tmp_dir, f"perm_{i:04d}")
-    result = {"i": i, **{k: np.nan for k in metric_names}}
     try:
         d2_file = h2_file = None
         if need_d2 or need_k2:
-            d2_file, h2_file = run_d2(sample_file, delay, theiler, prefix)
-            if need_d2:
-                result["D2"] = extract_d2(d2_file)
-            if need_k2:
-                result["K2"] = extract_k2(h2_file)
+            d2_file, h2_file = run_d2(data_file, delay, theiler, prefix)
+        if need_d2 and d2_file:
+            mu, sg, nn = extract_d2_mean_std(d2_file)
+            out["D2"], out_std["D2"] = mu, sg
+            out_n["D2"] = nn
+        if need_k2 and h2_file:
+            mu, sg, nn = extract_k2_mean_std(h2_file)
+            out["K2"], out_std["K2"] = mu, sg
+            out_n["K2"] = nn
         if need_lle:
             lyap_file = prefix + "_lyap.txt"
-            run_lyap_k(sample_file, delay, lyap_file)
-            result["LLE"] = extract_lle(lyap_file)
+            run_lyap_k(data_file, delay, lyap_file)
+            mu, sg, nn = extract_lle_mean_std(lyap_file)
+            out["LLE"], out_std["LLE"] = mu, sg
+            out_n["LLE"] = nn
         if need_rqa:
-            rqa_vals = compute_pyrqa_metrics(sample, delay, theiler, rqa_radius)
+            rqa_values = compute_pyrqa_metrics(series_array, delay, theiler, rqa_radius)
             for k in RQA_KEYS:
-                if k in result:
-                    result[k] = rqa_vals.get(k, np.nan)
+                if k in out:
+                    value = float(rqa_values.get(k, np.nan))
+                    out[k] = value
+                    out_std[k] = np.nan
+                    out_n[k] = 1 if np.isfinite(value) else 0
     except subprocess.CalledProcessError:
-        logger.exception(
-            "Surrogate replicate i=%d: TISEAN subprocess failed (see returncode/cmd in traceback)",
-            i,
-        )
-    except OSError:
-        logger.exception("Surrogate replicate i=%d: I/O error", i)
+        logger.exception("TISEAN failed for label=%s", label)
     except Exception:
-        logger.exception("Surrogate replicate i=%d: unexpected error", i)
+        logger.exception("Error computing invariants for label=%s", label)
     finally:
         for tmp in glob.glob(prefix + "*"):
             try:
                 os.remove(tmp)
             except OSError:
                 pass
-        try:
-            os.remove(sample_file)
-        except OSError:
-            pass
-    return result
 
-
-def safe_mean(arr):
-    """Mean of 1d array; NaN if empty (used for surrogate batch summaries in main)."""
-    return float(np.mean(arr)) if len(arr) > 0 else np.nan
-
-
-def safe_std(arr):
-    """Sample SD (ddof=1) across surrogate replicates; aligns with table ``SD(surr)`` column."""
-    return float(np.std(arr, ddof=1)) if len(arr) > 1 else (float(np.std(arr)) if len(arr) == 1 else np.nan)
-
-
-# Empirical tail for p = (1 + #{...}) / (B + 1); see Theiler et al. style surrogate testing.
-# D2/K2: typically test whether original is unusually small vs surrogates (lower tail).
-# LLE: typically unusually large (upper tail). RQA scalars: omnibus two-sided combination.
-METRIC_EMPIRICAL_TAIL = {
-    "D2": "lower",
-    "K2": "lower",
-    "LLE": "upper",
-    "RR": "two_sided",
-    "DET": "two_sided",
-    "LAM": "two_sided",
-    "MAXLINE": "two_sided",
-    "ENTR": "two_sided",
-    "TT": "two_sided",
-}
-
-
-def empirical_surrogate_test(
-    boot_dist: np.ndarray,
-    orig_val: float,
-    tail: str,
-    alpha: float = DEFAULT_ALPHA,
-) -> tuple[float, float, float, str, float]:
-    """
-    Rank/count empirical p-value from B surrogate replicates (no Gaussian / t-assumption).
-
-    Let T_1..T_B be surrogate metric values. Define:
-      p_upper = (1 + #{T_i >= T_orig}) / (B + 1)
-      p_lower = (1 + #{T_i <= T_orig}) / (B + 1)
-
-    tail='upper' uses p_upper; 'lower' uses p_lower.
-    tail='two_sided' uses min(1, 2 * min(p_upper, p_lower)) when direction is not fixed a priori.
-
-    Descriptive (not used for p):
-      z_sigma = (T_orig - mean(T)) / SD(T)  — sigma-score (Theiler-style).
-      SE(surr) = SD(T) / sqrt(B)  — standard error of Mean(surr) (same SD as z_sigma denominator).
-      z_se    = (T_orig - mean(T)) / SE(surr) — sensitive to B; for comparison only.
-
-    Decision: reject H0 if p < alpha (default alpha={DEFAULT_ALPHA}).
-
-    Returns (z_sigma, z_se, p_val, decision, SE_surr_mean).
-    """
-    bd = np.asarray(boot_dist, dtype=float)
-    bd = bd[np.isfinite(bd)]
-    b_reps = len(bd)
-    if b_reps < 1 or not np.isfinite(orig_val):
-        return np.nan, np.nan, np.nan, "insufficient data", np.nan
-
-    m = float(np.mean(bd))
-    # SD across surrogate *replicates* (not within-run curve noise); used for z_sigma denominator.
-    sd = float(np.std(bd, ddof=1)) if b_reps > 1 else 0.0
-    # Standard error of the mean of surrogates: SD/sqrt(B); denominator for z_SE (not for p-value).
-    se = sd / np.sqrt(b_reps) if b_reps > 0 else np.nan
-
-    if sd > 0:
-        z_sigma = float((orig_val - m) / sd)
-    elif np.isfinite(orig_val) and np.isfinite(m) and np.isclose(orig_val, m, rtol=0.0, atol=1e-12):
-        z_sigma = 0.0
-    else:
-        z_sigma = float(np.sign(orig_val - m)) * np.inf
-
-    if np.isfinite(se) and se > 0:
-        z_se = float((orig_val - m) / se)
-    else:
-        z_se = np.nan
-
-    # Empirical rank counts include equality (+1 in numerator and B+1 denominator avoids p=0).
-    ge = int(np.sum(bd >= orig_val))
-    le = int(np.sum(bd <= orig_val))
-    p_upper = (1 + ge) / (b_reps + 1)
-    p_lower = (1 + le) / (b_reps + 1)
-
-    if tail == "upper":
-        p_val = p_upper
-    elif tail == "lower":
-        p_val = p_lower
-    elif tail == "two_sided":
-        p_val = min(1.0, 2.0 * min(p_upper, p_lower))
-    else:
-        raise ValueError(f"unknown tail mode: {tail!r}")
-
-    decision = (
-        "reject H0" if np.isfinite(p_val) and (p_val < alpha) else "fail to reject H0"
-    )
-    return z_sigma, z_se, float(p_val), decision, float(se)
+    return out, out_std, out_n
 
 
 def predictability_time(lle, eps=PRED_EPSILON, tol=PRED_TOLERANCE):
-    """T = (1/lambda) * log(tol/eps) for lambda > 0; nan otherwise."""
     if lle is None or not np.isfinite(lle) or lle <= 0:
         return np.nan
     return float((1.0 / lle) * np.log(tol / eps))
 
 
+def parse_metrics_list(raw_metrics):
+    tokens = [t.strip().upper() for t in str(raw_metrics).split(",") if t.strip()]
+    if not tokens:
+        raise ValueError("metrics list is empty")
+    invalid = [t for t in tokens if t not in ALL_METRICS]
+    if invalid:
+        raise ValueError(f"unknown metric(s): {', '.join(invalid)}")
+    return list(dict.fromkeys(tokens))
+
+
+def metric_names_for_scope(_=None):
+    return ["D2", "K2", "LLE", *RQA_KEYS]
+
+
+def is_test_mode(value):
+    return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
 def main():
-    """CLI entry: build surrogates, compute metrics, write ``<base>_surrogate_summary.txt``, print table."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", required=True)
     parser.add_argument("--base", required=True)
@@ -573,50 +384,12 @@ def main():
     parser.add_argument("--theiler", type=int, required=True)
     parser.add_argument("--output_dir", required=True)
     parser.add_argument("--test_mode", default="false")
-    parser.add_argument(
-        "--metrics",
-        choices=(METRICS_SCOPE_FULL, METRICS_SCOPE_D2_K2_LLE_RQA),
-        default=METRICS_SCOPE_FULL,
-        help="full or d2_k2_lle_rqa: D2, K2, LLE and RQA metrics.",
-    )
-    parser.add_argument(
-        "--metrics_list",
-        default="",
-        help="Optional explicit comma-separated metric subset (e.g. D2,K2 or LLE or RR,DET). Overrides --metrics.",
-    )
-    parser.add_argument(
-        "--surrogate_blocks",
-        type=int,
-        default=100,
-        help="Number of contiguous blocks used for block-permutation surrogate generation (default 100).",
-    )
-    parser.add_argument(
-        "--alpha",
-        type=float,
-        default=DEFAULT_ALPHA,
-        help=f"Significance level for empirical p-value decisions (default {DEFAULT_ALPHA}: reject H0 if p < alpha).",
-    )
-    parser.add_argument(
-        "--decision_abs_z_sigma",
-        type=float,
-        default=None,
-        metavar="K",
-        help=(
-            "If set (e.g. 3), reject H0 when |z_sigma|>=K instead of using empirical p < alpha. "
-            "Does not override 'insufficient data'. p-values in the table are unchanged."
-        ),
-    )
-    parser.add_argument(
-        "--rqa_radius",
-        type=float,
-        default=DEFAULT_RQA_RADIUS,
-        metavar="R",
-        help=(
-            "PyRQA fixed recurrence radius (same as TISEAN recurr -r / RAD_RQA_<sym>). "
-            "Ignored unless RQA metrics are requested. Default: %(default)g."
-        ),
-    )
+    parser.add_argument("--metrics", default="full")
+    parser.add_argument("--metrics_list", default="")
+    parser.add_argument("--alpha", type=float, default=DEFAULT_ALPHA)
+    parser.add_argument("--rqa_radius", type=float, default=DEFAULT_RQA_RADIUS)
     args = parser.parse_args()
+
     if not (0.0 < args.alpha < 1.0):
         raise SystemExit("hypothesis.py: --alpha must be strictly between 0 and 1.")
     if args.rqa_radius <= 0.0:
@@ -630,234 +403,184 @@ def main():
 
     os.makedirs(args.output_dir, exist_ok=True)
 
-    test_mode = is_test_mode(args.test_mode)
-    b_reps = TEST_B if test_mode else FULL_B
-
-    metric_names = parse_metrics_list(args.metrics_list) if args.metrics_list.strip() else metric_names_for_scope(args.metrics)
-
-    metrics_label = ",".join(metric_names)
-    print(f"  -> Starting permutation-surrogate hypothesis test for {args.base} (tau={args.delay}, W={args.theiler})")
-    print(f"  -> Mode: {'TEST' if test_mode else 'FULL'}, surrogate replicates B={b_reps}, metrics={metrics_label}")
-    _dec_msg = (
-        f"decision by |z_sigma|>={args.decision_abs_z_sigma:g} (not p-threshold)"
-        if args.decision_abs_z_sigma is not None
-        else f"decision by empirical p<{args.alpha:g}"
-    )
-    _rqa_note = (
-        f" PyRQA r={args.rqa_radius:g}."
-        if any(k in metric_names for k in RQA_KEYS)
-        else ""
-    )
-    print(
-        f"  -> Surrogates: block permutation (N_blocks={args.surrogate_blocks}); "
-        "inference: empirical p from surrogate ranks (Theiler-style); "
-        f"z_sigma / z_SE(B={b_reps}) in table; {_dec_msg}.{_rqa_note}"
+    metric_names = (
+        parse_metrics_list(args.metrics_list)
+        if args.metrics_list.strip()
+        else metric_names_for_scope(args.metrics)
     )
 
+    print(f"  -> Surrogate hypothesis test (single surrogate): {args.base}")
+    print(f"     tau={args.delay}, W={args.theiler}, alpha={args.alpha}, "
+          f"metrics={','.join(metric_names)}")
+
+    # ------------------------------------------------------------------
+    # 1. Load original log-returns; estimate mu and sigma of the series
+    # ------------------------------------------------------------------
     orig_data = load_data(args.input)
     n = len(orig_data)
+    mu_r = float(np.mean(orig_data))
+    sigma_r = float(np.std(orig_data, ddof=1))
+    print(f"  -> Original series: n={n}, mu={mu_r:.6f}, sigma={sigma_r:.6f}")
 
-    print(f"  -> Generating {b_reps} block-permuted surrogate samples...")
-    permuted_samples = generate_permuted_samples(orig_data, b_reps, n_blocks=args.surrogate_blocks)
+    # ------------------------------------------------------------------
+    # 2. Generate surrogate (randperm) and two reference series
+    # ------------------------------------------------------------------
+    surr_data = generate_single_surrogate(orig_data)
+    norm_data = generate_normal_series(mu_r, sigma_r, n)
+    t_data = generate_t_series(mu_r, sigma_r, n, dof=T_DOF)
 
-    tmp_dir = os.path.join(args.output_dir, "tmp_perm")
+    series_specs = [
+        ("orig",   orig_data),
+        ("surr",   surr_data),
+        ("normal", norm_data),
+        (f"t{T_DOF}", t_data),
+    ]
+
+    # ------------------------------------------------------------------
+    # 3. Compute invariants. LLE/RQA are original-only because they are scalar here.
+    # ------------------------------------------------------------------
+    tmp_dir = os.path.join(args.output_dir, "tmp_hyp")
     os.makedirs(tmp_dir, exist_ok=True)
 
-    boot = {name: np.full(b_reps, np.nan, dtype=float) for name in metric_names}
+    results = {}   # label -> {metric: mean invariant value}
+    stds    = {}   # label -> {metric: SD of invariant values}
+    counts  = {}   # label -> {metric: n values used for SD}
 
-    print("  -> Launching parallel TISEAN + RQA execution...")
-    tasks = [
-        (i, permuted_samples[i], tmp_dir, args.delay, args.theiler, metric_names, args.rqa_radius)
-        for i in range(b_reps)
-    ]
-    with concurrent.futures.ProcessPoolExecutor() as executor:
-        for count, res in enumerate(executor.map(process_single_bootstrap, tasks), 1):
-            idx = res["i"]
-            for metric in metric_names:
-                boot[metric][idx] = res.get(metric, np.nan)
-            if count % 25 == 0 or count == b_reps:
-                print(f"    Completed {count}/{b_reps} surrogate iterations...")
+    for label, series in series_specs:
+        metrics_for_label = (
+            metric_names
+            if label == "orig"
+            else [m for m in metric_names if m in NULL_SERIES_METRICS]
+        )
+
+        if metrics_for_label:
+            print(f"  -> Computing invariants for series: {label} ({','.join(metrics_for_label)}) ...")
+            inv_part, inv_std_part, inv_n_part = compute_invariants(
+                series, tmp_dir, f"{args.base}_{label}",
+                args.delay, args.theiler, metrics_for_label, args.rqa_radius,
+                series_std_fallback=sigma_r,
+            )
+        else:
+            print(f"  -> Skipping invariant recomputation for series: {label} (not needed for selected metrics).")
+            inv_part, inv_std_part, inv_n_part = {}, {}, {}
+
+        results[label] = {k: inv_part.get(k, np.nan) for k in metric_names}
+        stds[label]    = {k: inv_std_part.get(k, np.nan) for k in metric_names}
+        counts[label]  = {k: inv_n_part.get(k, 0) for k in metric_names}
 
     try:
         os.rmdir(tmp_dir)
     except OSError:
         pass
 
-    # Original-series metrics (and plateau std_orig for D2/K2) for comparison to surrogate clouds.
-    print("  -> Computing invariants for original data...")
-    orig, orig_std = compute_original_invariants(
-        args.input,
-        args.output_dir,
-        args.base,
-        args.delay,
-        args.theiler,
-        metric_names=metric_names,
-        rqa_radius=args.rqa_radius,
-    )
-
-    # Drop failed surrogate runs before p-values (finite values only).
-    boot_clean = {k: arr[np.isfinite(arr)] for k, arr in boot.items()}
-    z_sigma_scores: dict[str, float] = {}
-    z_se_scores: dict[str, float] = {}
-    se_surr_scores: dict[str, float] = {}
-    p_values = {}
+    # ------------------------------------------------------------------
+    # 4. F-test: equality of invariant SD/variance, original vs shuffled surrogate
+    # ------------------------------------------------------------------
+    f_stats   = {}
+    p_values  = {}
     decisions = {}
-    for k in metric_names:
-        tail_k = METRIC_EMPIRICAL_TAIL.get(k, "two_sided")
-        zs, zse, p_val, dec, se_surr = empirical_surrogate_test(
-            boot_clean[k], orig[k], tail_k, alpha=args.alpha
+
+    for metric in metric_names:
+        f_stat, p, dec = invariant_sd_f_test(
+            stds["orig"].get(metric, np.nan),
+            counts["orig"].get(metric, 0),
+            stds["surr"].get(metric, np.nan),
+            counts["surr"].get(metric, 0),
+            args.alpha,
         )
-        z_sigma_scores[k] = zs
-        z_se_scores[k] = zse
-        se_surr_scores[k] = se_surr
-        p_values[k] = p_val
-        decisions[k] = dec
+        f_stats[metric] = f_stat
+        p_values[metric]  = p
+        decisions[metric] = dec
 
-    # Optional override: replace p-value-based decision with a fixed |z_sigma| threshold (thesis convention).
-    if args.decision_abs_z_sigma is not None:
-        thr = float(args.decision_abs_z_sigma)
-        for k in metric_names:
-            if decisions[k] == "insufficient data":
-                continue
-            zs = z_sigma_scores[k]
-            if np.isfinite(zs) and abs(zs) >= thr:
-                decisions[k] = "reject H0"
-            elif np.isfinite(zs):
-                decisions[k] = "fail to reject H0"
+    # ------------------------------------------------------------------
+    # 5. Write output table
+    # ------------------------------------------------------------------
+    labels_ordered = [lbl for lbl, _ in series_specs]
 
-    # Predictability time from LLE is ancillary (hours); hypothesis on LLE remains in the main table above.
-    lle_orig = orig.get("LLE", np.nan)
-    T_orig = predictability_time(lle_orig)
-    lle_boot = boot_clean.get("LLE", np.array([]))
-    pos_lle_boot = lle_boot[(np.isfinite(lle_boot)) & (lle_boot > 0)] if len(lle_boot) else np.array([])
-    if pos_lle_boot.size:
-        T_boot = (1.0 / pos_lle_boot) * np.log(PRED_TOLERANCE / PRED_EPSILON)
-        T_boot_mean = float(np.mean(T_boot))
-        T_boot_lo = float(np.percentile(T_boot, 2.5))
-        T_boot_hi = float(np.percentile(T_boot, 97.5))
-        T_boot_n = int(pos_lle_boot.size)
-    else:
-        T_boot_mean = np.nan
-        T_boot_lo = np.nan
-        T_boot_hi = np.nan
-        T_boot_n = 0
-
-    # Human-readable report + mirrored console block (table + conclusion); paths stable for ``print_results.py``.
     summary_file = os.path.join(args.output_dir, f"{args.base}_surrogate_summary.txt")
-    with open(summary_file, "w", encoding="utf-8") as handle:
-        handle.write(f"Permutation surrogate hypothesis test ({args.base})\n")
-        _param_line = (
-            f"tau={args.delay}, W={args.theiler}, B={b_reps}, metrics={metrics_label}, "
-            f"surrogate_blocks={args.surrogate_blocks}"
+    with open(summary_file, "w", encoding="utf-8") as fh:
+        fh.write(f"Single-surrogate hypothesis test ({args.base})\n")
+        fh.write(
+            f"Parameters: tau={args.delay}, W={args.theiler}, alpha={args.alpha}, "
+            f"metrics={','.join(metric_names)}, T_dof={T_DOF}\n"
         )
-        if any(k in metric_names for k in RQA_KEYS):
-            _param_line += f", r_PyRQA={args.rqa_radius:g}"
-        handle.write(f"Parameters: {_param_line}\n")
-        handle.write(f"Original data length: {n}\n")
-        handle.write(f"Mode: {'TEST' if test_mode else 'FULL'}\n")
-        handle.write("Surrogates: block permutation of observed series (contiguous blocks shuffled in random order).\n")
-        _rule_p = (
-            f"Reject H0 if p < {args.alpha:g} (empirical rank p-values)."
-            if args.decision_abs_z_sigma is None
-            else (
-                f"Reject H0 if |z_sigma| >= {args.decision_abs_z_sigma:g} "
-                "(decision column only; p-values still empirical)."
-            )
+        fh.write(f"Original series: n={n}, mu_r={mu_r:.6f}, sigma_r={sigma_r:.6f}\n")
+        fh.write(
+            "Surrogate: randperm (full random permutation, no blocking).\n"
+            "Normal:    N(mu_r, sigma_r) of same length.\n"
+            f"t-series:  t(dof={T_DOF}) scaled to (mu_r, sigma_r) of same length.\n"
+            "Null/reference invariants are recomputed only for D2/K2, where the variance test is defined.\n"
         )
-        handle.write(
-            "Inference : empirical p-values from surrogate counts (+1 / B+1 correction); "
-            "tails: D2,K2=lower; LLE=upper; RQA=two_sided (see METRIC_EMPIRICAL_TAIL in hypothesis.py). "
-            "std_orig = sample SD of curve ordinates in the same plateau window as orig_mean (D2/K2 only; else nan). "
-            "SE(surr) = SD(surr)/√B — standard error of Mean(surr); "
-            "z_sigma = (orig_mean−Mean(surr))/SD(surr) (Theiler-style); "
-            f"z_SE(B={b_reps}) = (orig_mean−Mean(surr))/SE(surr) — descriptive. "
-            f"{_rule_p}\n\n"
+        fh.write(
+            "Test: two-sided F-test of invariant SD/variance, original vs shuffled surrogate.\n"
+            "  H0: Var_orig(invariant values) = Var_surr(invariant values), alpha=0.01 by default.\n"
+            "  Normal and t-series are reported as reference benchmarks, not as the main p-value pair.\n"
+            "Invariant value sources:\n"
+            "  D2/K2 — all second-column values from #dim=3 block\n"
+            "  LLE   — one slope of S(t) from the first m=3 lyap_k epsilon block; SD/F-test is unavailable for n=1\n"
+            "  RQA   — one value computed on the full time series; SD/F-test is unavailable for n=1\n\n"
         )
-        _hdr = (
-            f"Invariant    orig_mean   std_orig  Mean(surr)  SD(surr)   SE(surr)    "
-            f"z_sigma   z_SE(B={b_reps})    p-value    decision"
-        )
-        handle.write(_hdr + "\n")
-        handle.write("-" * len(_hdr) + "\n")
 
-        # Fixed-width column helpers so console and file tables stay aligned with ``_hdr``.
-        def _fmt_zcol(z: float) -> str:
-            if np.isnan(z):
-                return "      nan"
-            return f"{z:>10.4f}"
+        # --- Series statistics header ---
+        fh.write("Series statistics (mean and SD of each series):\n")
+        fh.write(f"  {'series':<10}  {'mean':>12}  {'sd':>12}\n")
+        fh.write(f"  {'-'*38}\n")
+        for label, series in series_specs:
+            fh.write(f"  {label:<10}  {np.mean(series):>12.6f}  {np.std(series, ddof=1):>12.6f}\n")
+        fh.write("\n")
 
-        def _fmt_os(x: float) -> str:
-            if np.isnan(x):
-                return "      nan"
-            return f"{x:>9.4f}"
+        # --- Invariant values table ---
+        col_w = 12
+        hdr_parts = [f"{'Invariant':<12}", f"{'orig_sd':>{col_w}}", f"{'surr_sd':>{col_w}}", f"{'n':>{6}}"]
+        for lbl in labels_ordered:
+            hdr_parts.append(f"{lbl:>{col_w}}")
+        hdr_parts += [f"{'F':>{col_w}}", f"{'p-value':>{col_w}}", f"{'decision':<20}"]
+        hdr = "  " + "  ".join(hdr_parts)
+        fh.write(hdr + "\n")
+        fh.write("  " + "-" * (len(hdr) - 2) + "\n")
 
-        def _fmt_se_col(x: float) -> str:
-            if np.isnan(x):
-                return "      nan"
-            return f"{x:>9.4f}"
+        def _f(v):
+            return f"{v:>{col_w}.4f}" if np.isfinite(v) else f"{'nan':>{col_w}}"
 
-        print("\n  --- Surrogate summary table (also saved to file) ---")
-        print(f"  {_hdr}")
-        print(f"  {'-' * len(_hdr)}")
+        print(f"\n  --- Invariant table ---")
+        print(f"  {hdr.strip()}")
+        print(f"  {'-' * (len(hdr) - 2)}")
+
         for metric in metric_names:
-            bd = boot_clean[metric]
-            mn = safe_mean(bd)
-            sdb = safe_std(bd)
-            zs = z_sigma_scores[metric]
-            zse = z_se_scores[metric]
-            ses = se_surr_scores.get(metric, np.nan)
-            pv = p_values[metric]
-            ssig = _fmt_zcol(zs)
-            sse = _fmt_zcol(zse)
-            pp = f"{pv:>10.4f}" if np.isfinite(pv) else "      nan"
-            so = _fmt_os(orig_std.get(metric, np.nan))
-            se_cell = _fmt_se_col(ses)
-            row = (
-                f"{metric:<14} {orig[metric]:>8.4f}  {so}  {mn:>10.4f}  {sdb:>10.4f}  {se_cell}  {ssig}  {sse}  {pp}  "
-                f"{decisions[metric]}"
-            )
-            handle.write(row + "\n")
-            print(f"  {row}")
-        if args.decision_abs_z_sigma is None:
-            _cl = f"\nConclusion (decision by empirical p < {args.alpha:g}):\n"
-        else:
-            _cl = f"\nConclusion (decision by |z_sigma| >= {args.decision_abs_z_sigma:g}):\n"
-        handle.write(_cl)
-        print(_cl.rstrip())
-        for metric in metric_names:
-            _ln = f"  {metric:<8}: {decisions[metric]}\n"
-            handle.write(_ln)
-            print(_ln.rstrip())
+            so = stds["orig"].get(metric, np.nan)
+            ss = stds["surr"].get(metric, np.nan)
+            nn = counts["orig"].get(metric, 0)
+            row_parts = [f"{metric:<12}", _f(so), _f(ss), f"{nn:>6}"]
+            for lbl in labels_ordered:
+                row_parts.append(_f(results[lbl][metric]))
+            row_parts.append(_f(f_stats[metric]))
+            row_parts.append(_f(p_values[metric]))
+            row_parts.append(f"  {decisions[metric]:<20}")
+            row = "  " + "  ".join(row_parts)
+            fh.write(row + "\n")
+            print(f"  {row.strip()}")
 
+        # --- Conclusion ---
+        fh.write(f"\nConclusion (alpha={args.alpha}):\n")
+        print(f"\n  Conclusion (alpha={args.alpha}):")
+        for metric in metric_names:
+            line = f"  {metric:<10}: {decisions[metric]}"
+            fh.write(line + "\n")
+            print(line)
+
+        # --- Predictability time (LLE) ---
         if "LLE" in metric_names:
-            handle.write("\nPredictability time T (hours)\n")
-            handle.write("-----------------------------\n")
-            handle.write(
-                f"  Formula      : T = (1/lambda) * log(L/eps)  with eps={PRED_EPSILON:g}, L={PRED_TOLERANCE:g}\n"
-            )
-            handle.write(f"  Original LLE : {lle_orig:.6f}\n")
+            lle_orig = results["orig"].get("LLE", np.nan)
+            T_orig = predictability_time(lle_orig)
+            fh.write("\nPredictability time T (hours)\n")
+            fh.write(f"  T = (1/lambda) * log(L/eps), eps={PRED_EPSILON:g}, L={PRED_TOLERANCE:g}\n")
+            fh.write(f"  Original LLE : {lle_orig:.6f}\n")
             if np.isfinite(T_orig):
-                handle.write(f"  Original T   : {T_orig:.2f} hours ({T_orig/24:.2f} days)\n")
+                fh.write(f"  Original T   : {T_orig:.2f} h ({T_orig/24:.2f} days)\n")
             else:
-                handle.write("  Original T   : undefined (LLE <= 0 or non-finite -> not predictable in this model)\n")
-            if T_boot_n > 0:
-                handle.write(
-                    "  Surrogate T  : mean={mean:.2f} h, 95% CI=[{lo:.2f}, {hi:.2f}] h, "
-                    "based on {n_pos}/{n_tot} positive-LLE surrogates\n".format(
-                        mean=T_boot_mean,
-                        lo=T_boot_lo,
-                        hi=T_boot_hi,
-                        n_pos=T_boot_n,
-                        n_tot=int(np.sum(np.isfinite(lle_boot))) if len(lle_boot) else 0,
-                    )
-                )
-            else:
-                handle.write("  Surrogate T  : no surrogate has lambda > 0 -> T undefined for surrogate distribution\n")
-            handle.write(
-                "  Note         : LLE itself is hypothesis-tested above; T is reported for predictability budgeting only.\n"
-            )
+                fh.write("  Original T   : undefined (LLE <= 0)\n")
 
-    print(f"  -> Summary written to {summary_file}")
+    print(f"\n  -> Summary written to {summary_file}")
 
 
 if __name__ == "__main__":

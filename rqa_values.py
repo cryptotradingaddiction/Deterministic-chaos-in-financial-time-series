@@ -38,7 +38,7 @@ def main():
     per_coin = parse_per_coin_settings_bat(bat_path)
     if not os.path.isfile(bat_path):
         print(f"[WARN] Per-coin settings not found: {bat_path}")
-        print("       Using defaults tau=3, r=0.01, W=0 (same fallbacks as RQA.bat).")
+        print("       Using defaults tau=3, r=0.005, W=0 (same fallbacks as RQA.bat).")
     elif not per_coin:
         print(f"[WARN] No assignments parsed from {bat_path}")
 

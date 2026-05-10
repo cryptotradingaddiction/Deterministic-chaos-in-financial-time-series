@@ -264,6 +264,7 @@ def _parse_bootstrap_summary(path):
         "B": "",
         "n": "",
         "mode": "",
+        "format": "legacy",
         "metrics": {},          # orig, std_orig, mean, std, se_surr, z_sigma, pvalue; legacy 'score' = z_sigma
         "conclusion": {},       # name -> "reject H0" / "fail to reject H0" / "insufficient data"
         "T_original": "",
@@ -275,6 +276,64 @@ def _parse_bootstrap_summary(path):
             text = f.read()
     except OSError:
         return None
+
+    def _parse_float_tok(s):
+        sl = (s or "").strip().lower()
+        if sl == "nan":
+            return float("nan")
+        if sl in ("inf", "+inf"):
+            return float("inf")
+        if sl == "-inf":
+            return float("-inf")
+        return float(s)
+
+    # Current hypothesis.py format: one randperm surrogate + normal/t references.
+    m = re.search(r"Single-surrogate hypothesis test\s+\(([^)]+)\)", text)
+    if m:
+        info["format"] = "single_surrogate"
+        info["symbol"] = m.group(1).strip()
+        info["B"] = "1"
+        pm = re.search(r"Parameters:\s*tau=(\d+),\s*W=(\d+),\s*alpha=([0-9.]+)", text)
+        if pm:
+            info["tau"], info["W"] = pm.group(1), pm.group(2)
+            info["alpha"] = pm.group(3)
+        nm = re.search(r"Original series:\s*n=(\d+)", text)
+        if nm:
+            info["n"] = nm.group(1)
+        info["mode"] = "FULL" if "full" in path.lower() else ("TEST" if "test" in path.lower() else "")
+
+        row_re_single = re.compile(
+            r"^(?P<name>D2|K2|LLE|RR|DET|LAM|MAXLINE|ENTR|TT)\s+"
+            r"(?P<orig_sd>-?(?:nan|inf|\d+\.\d+))\s+"
+            r"(?P<surr_sd>-?(?:nan|inf|\d+\.\d+))\s+"
+            r"(?P<n>\d+)\s+"
+            r"(?P<orig>-?(?:nan|inf|\d+\.\d+))\s+"
+            r"(?P<surr>-?(?:nan|inf|\d+\.\d+))\s+"
+            r"(?P<normal>-?(?:nan|inf|\d+\.\d+))\s+"
+            r"(?P<tref>-?(?:nan|inf|\d+\.\d+))\s+"
+            r"(?P<F>-?(?:nan|inf|\d+\.\d+))\s+"
+            r"(?P<pvalue>-?(?:nan|inf|\d*\.?\d+(?:[eE][+-]?\d+)?))\s+"
+            r"(?P<decision>reject H0|fail to reject H0|insufficient n|no sd)\s*$"
+        )
+        for line in text.splitlines():
+            rm = row_re_single.match(line.strip())
+            if not rm:
+                continue
+            name = rm.group("name")
+            info["metrics"][name] = {
+                "orig": _parse_float_tok(rm.group("orig")),
+                "std_orig": _parse_float_tok(rm.group("orig_sd")),
+                "mean": _parse_float_tok(rm.group("surr")),
+                "std": _parse_float_tok(rm.group("surr_sd")),
+                "normal": _parse_float_tok(rm.group("normal")),
+                "t_ref": _parse_float_tok(rm.group("tref")),
+                "n": int(rm.group("n")),
+                "F": _parse_float_tok(rm.group("F")),
+                "score": _parse_float_tok(rm.group("F")),
+                "pvalue": _parse_float_tok(rm.group("pvalue")),
+            }
+            info["conclusion"][name] = rm.group("decision")
+        return info
 
     m = re.search(r"Permutation surrogate hypothesis test\s+\(([^)]+)\)", text)
     if m:
@@ -558,6 +617,85 @@ def cmd_boot_aggregate(path, _n=None):
         parsed_infos.append((fp, info))
         metrics_present.extend([k for k in metric_order if k in info.get("metrics", {})])
     metric_names = tuple(dict.fromkeys(metrics_present)) if metrics_present else ("D2", "K2", "LLE")
+
+    if parsed_infos and all(info.get("format") == "single_surrogate" for _fp, info in parsed_infos):
+        with open(out_path, "w", encoding="utf-8") as fh:
+            fh.write("Hypothesis pipeline - aggregated summary\n")
+            fh.write(f"Scanned root : {path}\n")
+            fh.write(f"Files found  : {len(found)}\n")
+            fh.write("=" * 110 + "\n\n")
+
+            w = 11
+            header = f"{'Symbol':<8} {'tau':>4} {'W':>3} {'B':>3}"
+            for name in metric_names:
+                header += (
+                    f" {f'{name}_orig':>{w}} {f'{name}_orig_sd':>{w}}"
+                    f" {f'{name}_surr':>{w}} {f'{name}_surr_sd':>{w}}"
+                    f" {f'F_{name}':>{w}} {f'p_{name}':>{w}}"
+                )
+            header += f" {'rej_all':>7}"
+            fh.write(header + "\n")
+            fh.write("-" * len(header) + "\n")
+
+            for fp, info in parsed_infos:
+                row = f"{info['symbol']:<8} {info['tau']:>4} {info['W']:>3} {info['B']:>3}"
+                for name in metric_names:
+                    m = info["metrics"].get(name)
+                    if not m:
+                        row += f" {'nan':>{w}} {'nan':>{w}} {'nan':>{w}} {'nan':>{w}} {'nan':>{w}} {'nan':>{w}}"
+                        continue
+                    row += (
+                        f" {m['orig']:>{w}.4f} {m['std_orig']:>{w}.4f}"
+                        f" {m['mean']:>{w}.4f} {m['std']:>{w}.4f}"
+                        f" {m['F']:>{w}.4f} {m['pvalue']:>{w}.4f}"
+                    )
+                rej_all = (
+                    "YES"
+                    if all(info["conclusion"].get(n) == "reject H0" for n in metric_names)
+                    else "NO"
+                )
+                row += f" {rej_all:>7}"
+                fh.write(row + "\n")
+
+            fh.write(
+                "\nCurrent format: one random-permutation surrogate per series. "
+                "normal and t(3.5) reference values are reported inside each source summary; "
+                "main p-values test H0: Var(T_orig)=Var(T_surr) using a two-sided F-test at alpha=0.01.\n\n"
+            )
+
+            for fp, info in parsed_infos:
+                fh.write("=" * 110 + "\n")
+                fh.write(f"Source: {fp}\n")
+                fh.write(f"Symbol: {info['symbol']}   Mode: {info['mode']}   N: {info['n']}\n")
+                fh.write(f"  tau={info['tau']}, W={info['W']}, B={info['B']}\n")
+                fh.write(
+                    f"  {'metric':<8} {'orig':>10} {'orig_sd':>10} {'surr':>10} {'surr_sd':>10} "
+                    f"{'normal':>10} {'t3.5':>10} {'n':>5} {'F':>10} {'p-value':>10}  conclusion\n"
+                )
+                for name in metric_names:
+                    m = info["metrics"].get(name, {})
+                    con = info["conclusion"].get(name, "n/a")
+                    if m:
+                        fh.write(
+                            f"  {name:<8} {m['orig']:>10.4f} {m['std_orig']:>10.4f} "
+                            f"{m['mean']:>10.4f} {m['std']:>10.4f} "
+                            f"{m['normal']:>10.4f} {m['t_ref']:>10.4f} "
+                            f"{m['n']:>5} {m['F']:>10.4f} {m['pvalue']:>10.4f}  {con}\n"
+                        )
+                    else:
+                        fh.write(
+                            f"  {name:<8} {'nan':>10} {'nan':>10} {'nan':>10} {'nan':>10} "
+                            f"{'nan':>10} {'nan':>10} {'nan':>5} {'nan':>10} {'nan':>10}  {con}\n"
+                        )
+                fh.write("\n")
+
+        print(f"  Aggregated hypothesis summary -> {out_path}")
+        try:
+            with open(out_path, encoding="utf-8", errors="replace") as fh:
+                print(fh.read())
+        except OSError:
+            pass
+        return
 
     with open(out_path, "w", encoding="utf-8") as fh:
         fh.write("Hypothesis pipeline - aggregated summary\n")

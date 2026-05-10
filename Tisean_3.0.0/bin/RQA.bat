@@ -98,7 +98,7 @@ for %%F in (%FILES%) do (
     call set "COIN_RAD=%%RAD_RQA_!BASE!%%"
     call set "COIN_W=%%W_D2_!BASE!%%"
     if "!COIN_TAU!"=="" set "COIN_TAU=3"
-    if "!COIN_RAD!"=="" set "COIN_RAD=0.01"
+    if "!COIN_RAD!"=="" set "COIN_RAD=0.005"
     if "!COIN_W!"=="" set "COIN_W=0"
 
     call :RUN_RQA "!BASE!" "!DATA_FILE!" "run2_tau!COIN_TAU!_r!COIN_RAD!" !COIN_TAU! !COIN_RAD!
@@ -133,7 +133,7 @@ for %%F in (%FILES%) do (
     call set "COIN_TAU=%%TAU_RQA_!BASE!%%"
     call set "COIN_RAD=%%RAD_RQA_!BASE!%%"
     if "!COIN_TAU!"=="" set "COIN_TAU=3"
-    if "!COIN_RAD!"=="" set "COIN_RAD=0.01"
+    if "!COIN_RAD!"=="" set "COIN_RAD=0.005"
     "%PYTHON_EXE%" %PYTHON_ARGS% "%PRINT_RESULTS%" rqa "%OUT_ROOT%\!BASE!_run2_tau!COIN_TAU!_r!COIN_RAD!\!BASE!_rqa_metrics.txt"
 )
 

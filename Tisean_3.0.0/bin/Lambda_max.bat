@@ -26,8 +26,6 @@ call "%~dp0_per_coin_settings.bat"
 REM Fixed parameters for lyap_k (Kantz algorithm).
 set M_MIN=3
 set M_MAX=3
-set R_MIN=0.0005
-set R_MAX=0.05
 set STEPS=500
 REM ----------------------------------------------------------------------------
 
@@ -46,7 +44,7 @@ if /i "%TEST_MODE%"=="true" (
 )
 
 echo [INFO] Output root : %OUT_ROOT%
-echo [INFO] m range     : %M_MIN%..%M_MAX%   r=%R_MIN%..%R_MAX%   reference_pts=%STEPS%
+echo [INFO] m range     : %M_MIN%..%M_MAX%   r=TISEAN defaults   reference_pts=%STEPS%
 echo [INFO] Per-coin run:
 echo [INFO]   run2 = per-symbol (TAU_LLE_^<sym^>)
 
@@ -147,7 +145,7 @@ echo   Output dir: !OUT_DIR!
 echo   --------------------------------------------------
 
 echo   [1/2] lyap_k: S^(t^) divergence curves...
-"%TISEAN%\lyap_k.exe" -d!TAU_DELAY! -m%M_MIN% -M%M_MAX% -r%R_MIN% -R%R_MAX% -n%STEPS% -o "!OUT_DIR!\!BASE!_lyap.txt" "!DATA_FILE!"
+"%TISEAN%\lyap_k.exe" -d!TAU_DELAY! -m%M_MIN% -M%M_MAX% -n%STEPS% -o "!OUT_DIR!\!BASE!_lyap.txt" "!DATA_FILE!"
 if errorlevel 1 exit /b 1
 "%PYTHON_EXE%" %PYTHON_ARGS% "%PRINT_RESULTS%" lyap "!OUT_DIR!\!BASE!_lyap.txt"
 

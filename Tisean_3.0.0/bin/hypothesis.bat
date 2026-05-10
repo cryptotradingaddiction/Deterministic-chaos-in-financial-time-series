@@ -1,7 +1,7 @@
 @echo off
 setlocal
-echo NOTE: hypothesis.bat is now a distributed wrapper.
-echo It runs per-invariant pipelines that each execute their own hypothesis test.
+echo NOTE: hypothesis.bat is a distributed single-surrogate hypothesis wrapper.
+echo It runs per-invariant pipelines; each calls hypothesis.py for orig/randperm/normal/t reference runs.
 echo.
 
 echo [1/4] correlation_dimension.bat ...

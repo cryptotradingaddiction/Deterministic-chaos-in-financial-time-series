@@ -175,14 +175,13 @@ class PipelineApp(QMainWindow):
         return [
             "1. crypto_data_all.py",
             "2. compute_logreturns.py",
-            "3. liquidity.py",
-            "5. mutual.py",
-            "6. tau_w.py",
-            "7. phase_2D.py",
-            "8. phase_3D.py",
-            "9. cao_.py",
-            "10. 2dc.py",
-            "11. hypothesis.bat (distributed wrapper: D2/K2/LLE/RQA + surrogate tests)",
+            "3. mutual.py",
+            "4. tau_w.py",
+            "5. phase_2D.py",
+            "6. phase_3D.py",
+            "7. cao_.py",
+            "8. 2dc.py",
+            "9. hypothesis.bat (distributed wrapper: Takens/Ellner/LLE TS tests + RQA summaries)",
         ]
 
     def _python_cmd(self, script_name: str):
@@ -205,7 +204,6 @@ class PipelineApp(QMainWindow):
         return [
             self._python_cmd("crypto_data_all.py"),
             self._python_cmd("compute_logreturns.py"),
-            self._python_cmd("liquidity.py"),
             self._python_cmd("mutual.py"),
             self._python_cmd("tau_w.py"),
             self._python_cmd("phase_2D.py"),

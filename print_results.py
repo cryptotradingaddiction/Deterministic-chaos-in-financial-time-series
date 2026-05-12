@@ -7,9 +7,11 @@ Usage (called from .bat files):
 
 KIND is one of:
     file    PATH                      basic file info (size, line count)
-    d2      PATH                      multi-block D2 file (*.d2)
-    h2      PATH                      multi-block K2 file (*.h2)
+    d2      PATH                      diagnostic multi-block local D2 file (*.d2)
+    h2      PATH                      legacy multi-block K2 file (*.h2)
     takens  PATH                      Takens estimator output (*_takens.dat)
+    ellner_plot_data PATH              gnuplot data for Ellner interval estimates
+    takens_value PATH                  CSV row with m=3 Ellner value from the Takens plateau
     lyap    PATH                      lyap_k S(t) blocks (*_lyap.txt)
     rqa     PATH                      RQA metrics text file (rqa_values output)
     boot    PATH                      hypothesis.py surrogate-test summary
@@ -77,14 +79,123 @@ def read_blocks(path):
     return [b for b in blocks if b.size > 0]
 
 
-def _plateau(arr):
-    a = np.asarray(arr, dtype=float)
-    a = a[np.isfinite(a)]
-    if a.size == 0:
+def read_tagged_block(path, dim=3, tag="#dim"):
+    rows = []
+    current_dim = None
+    if not os.path.exists(path):
+        return np.empty((0, 2), dtype=float)
+    with open(path, encoding="utf-8", errors="ignore") as f:
+        for line in f:
+            s = line.strip()
+            if not s:
+                continue
+            if s.startswith(tag):
+                try:
+                    current_dim = int(s.split("=")[1].strip())
+                except (ValueError, IndexError):
+                    current_dim = None
+                continue
+            if s.startswith("#") or s.startswith("!"):
+                continue
+            if current_dim != dim:
+                continue
+            parts = s.split()
+            if len(parts) < 2:
+                continue
+            try:
+                rows.append((float(parts[0]), float(parts[1])))
+            except ValueError:
+                continue
+    return np.array(rows, dtype=float)
+
+
+def _stable_plateau_values(block, value_col=1, min_points=8):
+    """Return `(y_values, r_min, r_max)` for the best plateau window.
+
+    Mirrors `hypothesis.select_plateau_values`. `r_min` / `r_max` are NaN when
+    no usable rows are present.
+    """
+    b = np.asarray(block, dtype=float)
+    if b.size == 0 or b.ndim < 2 or b.shape[1] <= value_col:
+        return np.array([], dtype=float), float("nan"), float("nan")
+    eps = b[:, 0]
+    values = b[:, value_col]
+    mask = np.isfinite(eps) & np.isfinite(values) & (eps > 0.0) & (values > 0.0)
+    eps = eps[mask]
+    values = values[mask]
+    if values.size == 0:
+        return np.array([], dtype=float), float("nan"), float("nan")
+    order = np.argsort(np.log(eps))
+    eps_sorted = eps[order]
+    x = np.log(eps_sorted)
+    y = values[order]
+    n = y.size
+    if n < min_points:
+        return y, float(eps_sorted[0]), float(eps_sorted[-1])
+    best_score = -np.inf
+    best_ij = (0, n)
+    for i in range(0, n - min_points + 1):
+        for j in range(i + min_points, n + 1):
+            xs = x[i:j]
+            ys = y[i:j]
+            mean_abs = abs(float(np.mean(ys))) + 1e-12
+            try:
+                slope, _ = np.polyfit(xs, ys, 1)
+            except Exception:
+                continue
+            rel_slope = abs(float(slope)) / mean_abs
+            rel_sd = float(np.std(ys, ddof=1)) / mean_abs if ys.size > 1 else np.inf
+            length_bonus = (j - i) / n
+            score = 0.10 * length_bonus - rel_slope - rel_sd
+            if score > best_score:
+                best_score = score
+                best_ij = (i, j)
+    i, j = best_ij
+    return y[i:j], float(eps_sorted[i]), float(eps_sorted[j - 1])
+
+
+def _plateau(block, value_col=1):
+    vals, _r_min, _r_max = _stable_plateau_values(block, value_col=value_col)
+    vals = vals[np.isfinite(vals)]
+    if vals.size == 0:
         return float("nan")
-    n = a.size
-    lo, hi = n // 4, max(n // 4 + 1, 3 * n // 4)
-    return float(np.median(a[lo:hi]))
+    return float(np.mean(vals))
+
+
+def _ellner_from_c2(c2_path, r_min, r_max, dim=3):
+    """Replicate `hypothesis.compute_ellner_from_c2` to keep cmd_takens_value in sync."""
+    if not os.path.exists(c2_path):
+        return float("nan")
+    rows = read_tagged_block(c2_path, dim=dim, tag="#dim")
+    if rows.size == 0:
+        return float("nan")
+    if not (np.isfinite(r_min) and np.isfinite(r_max)) or r_min <= 0.0 or r_max <= r_min:
+        return float("nan")
+    r = rows[:, 0]
+    c = rows[:, 1]
+    finite = np.isfinite(r) & np.isfinite(c) & (r > 0.0) & (c > 0.0)
+    r = r[finite]
+    c = c[finite]
+    if r.size < 2:
+        return float("nan")
+    order = np.argsort(r)
+    r = r[order]
+    c = c[order]
+    mask = (r >= r_min) & (r <= r_max)
+    if int(mask.sum()) < 2:
+        return float("nan")
+    r_sel = r[mask]
+    c_sel = c[mask]
+    c_max = float(np.interp(r_max, r_sel, c_sel))
+    c_min = float(np.interp(r_min, r_sel, c_sel))
+    if not (np.isfinite(c_max) and np.isfinite(c_min)) or c_max <= c_min:
+        return float("nan")
+    integrand = c_sel / r_sel
+    _trapz = getattr(np, "trapezoid", np.trapz)
+    integral = float(_trapz(integrand, r_sel))
+    if not np.isfinite(integral) or integral <= 0.0:
+        return float("nan")
+    return float((c_max - c_min) / integral)
 
 
 def _saturation(values, last_k=5):
@@ -133,26 +244,37 @@ def cmd_head(path, n=12):
         print(f"  [WARN] cannot read: {e}")
 
 
-def _per_m_table(label, blocks, m_start, value_col=1):
+def _per_m_table(label, blocks, m_start, value_col=1, value_label=None, saturation_label=None):
     if not blocks:
         print(f"  [WARN] No data blocks ({label})")
         return
     print(f"  {label} per embedding m:")
-    print(f"  {'m':>4}  {label[:10]:>10}  {'pts':>5}")
+    if value_label is None:
+        value_label = label[:10]
+    print(f"  {'m':>4}  {value_label[:18]:>18}  {'pts':>5}")
     plateaus = []
     for i, b in enumerate(blocks, start=m_start):
         if b.ndim < 2 or b.shape[1] <= value_col:
             continue
-        v = _plateau(b[:, value_col])
+        v = _plateau(b, value_col=value_col)
         plateaus.append(v)
-        print(f"  {i:>4}  {v:>10.4f}  {b.shape[0]:>5}")
+        print(f"  {i:>4}  {v:>18.4f}  {b.shape[0]:>5}")
     sat = _saturation(plateaus)
-    print(f"  saturation estimate (median of last 5 m): {sat:.4f}")
+    if saturation_label is None:
+        saturation_label = "saturation estimate (median of last 5 m)"
+    print(f"  {saturation_label}: {sat:.4f}")
 
 
 def cmd_d2(path, _n=None):
     cmd_file(path)
-    _per_m_table("D2", read_blocks(path), m_start=1)
+    print("  Diagnostic only: local D2 slopes are not the active hypothesis metric.")
+    _per_m_table(
+        "Diagnostic local D2 slopes",
+        read_blocks(path),
+        m_start=1,
+        value_label="D2 plateau",
+        saturation_label="diagnostic median of last 5 m",
+    )
 
 
 def cmd_h2(path, _n=None):
@@ -163,17 +285,72 @@ def cmd_h2(path, _n=None):
 def cmd_takens(path, _n=None):
     cmd_file(path)
     blocks = read_blocks(path)
-    if not blocks:
-        return
-    last = blocks[-1]
-    if last.ndim < 2 or last.shape[1] < 2:
-        return
-    finite = last[np.isfinite(last[:, 1])]
-    if finite.size == 0:
-        return
-    median_dt = float(np.median(finite[:, 1]))
-    last_dt = float(finite[-1, 1])
-    print(f"  Takens D_T: median={median_dt:.4f}  last={last_dt:.4f}  rows={finite.shape[0]}")
+    _per_m_table(
+        "Takens plateau estimates",
+        blocks,
+        m_start=1,
+        value_label="Takens D_T",
+        saturation_label="Takens median of last 5 m",
+    )
+    if len(blocks) >= 3:
+        vals, r_min, r_max = _stable_plateau_values(blocks[2], value_col=1)
+        vals = vals[np.isfinite(vals)]
+        c2_path = path.replace("_takens.dat", ".c2")
+        ellner = _ellner_from_c2(c2_path, r_min, r_max, dim=3)
+        if np.isfinite(ellner):
+            print(
+                "  Ellner extension m=3: "
+                f"{ellner:.4f}  (plateau points={int(vals.size)}, "
+                f"r_min={r_min:.6g}, r_max={r_max:.6g})"
+            )
+
+
+def cmd_ellner_plot_data(path, _n=None):
+    """Emit gnuplot-ready Ellner interval data derived from a Takens file.
+
+    Ellner's estimator is a finite-interval scalar, not a scale-by-scale curve.
+    For plotting we therefore draw one horizontal segment per embedding m over
+    the exact `[r_min, r_max]` plateau interval selected from the corresponding
+    Takens block. This keeps the visual link to the Takens graph while avoiding
+    inventing a false pointwise Ellner curve.
+    """
+    blocks = read_blocks(path)
+    c2_path = path.replace("_takens.dat", ".c2")
+    for m, block in enumerate(blocks, start=1):
+        vals, r_min, r_max = _stable_plateau_values(block, value_col=1)
+        vals = vals[np.isfinite(vals)]
+        ellner = _ellner_from_c2(c2_path, r_min, r_max, dim=m)
+        print(
+            f"#m={m} ellner={ellner:.10g} "
+            f"r_min={r_min:.10g} r_max={r_max:.10g} plateau_points={int(vals.size)}"
+        )
+        if np.isfinite(ellner) and np.isfinite(r_min) and np.isfinite(r_max) and r_max > r_min:
+            print(f"{r_min:.12g} {ellner:.12g}")
+            print(f"{r_max:.12g} {ellner:.12g}")
+        print()
+
+
+def cmd_takens_value(path, _n=None):
+    """Emit CSV row: filename, Ellner-extension value (eq. 8.78), plateau-point count.
+
+    Detects the plateau on the m=3 d_2^(T)(r') curve, then evaluates the Ellner
+    estimate on the sibling .c2 file over the auto-detected [r_min, r_max].
+    Falls back to NaN when either step is undefined.
+    """
+    blocks = read_blocks(path)
+    value = float("nan")
+    points = 0
+    if len(blocks) >= 3:
+        vals, r_min, r_max = _stable_plateau_values(blocks[2], value_col=1)
+        vals = vals[np.isfinite(vals)]
+        points = int(vals.size)
+        c2_path = path.replace("_takens.dat", ".c2")
+        ellner = _ellner_from_c2(c2_path, r_min, r_max, dim=3)
+        if np.isfinite(ellner):
+            value = ellner
+        elif vals.size:
+            value = float(np.mean(vals))
+    print(f"{os.path.basename(path)},{value:.10g},{points}")
 
 
 def cmd_lyap(path, _n=None):
@@ -208,7 +385,7 @@ def cmd_lyap(path, _n=None):
     if not by_dim:
         print("  [WARN] No lyap blocks parsed")
         return
-    print("  Largest Lyapunov lambda per embedding m (slope on iter 2..10, first epsilon block):")
+    print("  Diagnostic largest-Lyapunov slopes from lyap_k S(t) (first epsilon block):")
     print(f"  {'m':>4}  {'lambda':>10}  {'pts':>5}")
     lambdas = []
     for m in sorted(by_dim.keys()):
@@ -217,10 +394,7 @@ def cmd_lyap(path, _n=None):
         lambdas.append(lam)
         print(f"  {m:>4}  {lam:>10.5f}  {b.shape[0]:>5}")
     sat = _saturation(lambdas)
-    print(f"  saturation lambda (median of last 5 m): {sat:.5f}")
-    if np.isfinite(sat) and sat > 0:
-        T = (1.0 / sat) * np.log(1e-2 / 1e-5)
-        print(f"  predictability time T (eps=1e-5, L=1e-2): {T:.2f} h ({T/24:.2f} d)")
+    print(f"  diagnostic lambda summary (median of last 5 m): {sat:.5f}")
 
 
 def cmd_rec(path, _n=None):
@@ -267,10 +441,8 @@ def _parse_bootstrap_summary(path):
         "format": "legacy",
         "metrics": {},          # orig, std_orig, mean, std, se_surr, z_sigma, pvalue; legacy 'score' = z_sigma
         "conclusion": {},       # name -> "reject H0" / "fail to reject H0" / "insufficient data"
-        "T_original": "",
-        "T_bootstrap": "",
     }
-    metric_names_row = ("D2", "K2", "LLE", "RR", "DET", "LAM", "MAXLINE", "ENTR", "TT")
+    metric_names_row = ("D2", "K2", "TAKENS", "ELLNER", "LLE", "RR", "DET", "LAM", "MAXLINE", "ENTR", "TT", "TREND")
     try:
         with open(path, encoding="utf-8", errors="replace") as f:
             text = f.read()
@@ -287,7 +459,63 @@ def _parse_bootstrap_summary(path):
             return float("-inf")
         return float(s)
 
-    # Current hypothesis.py format: one randperm surrogate + normal/t references.
+    # Current hypothesis.py format: stationary-bootstrap TS test for TAKENS/ELLNER/LLE.
+    m = re.search(r"Stationary-bootstrap hypothesis test\s+\(([^)]+)\)", text)
+    if m:
+        info["format"] = "stationary_bootstrap_ts"
+        info["symbol"] = m.group(1).strip()
+        pm = re.search(
+            r"Parameters:\s*tau=(\d+),\s*W=(\d+),\s*B=(\d+),\s*stationary_block_mean=([^,]+),\s*TS_threshold=([0-9.]+)",
+            text,
+        )
+        if pm:
+            info["tau"], info["W"], info["B"] = pm.group(1), pm.group(2), pm.group(3)
+            info["stationary_block_mean"] = pm.group(4)
+            info["TS_threshold"] = pm.group(5)
+        nm = re.search(r"Original series:\s*n=(\d+)", text)
+        if nm:
+            info["n"] = nm.group(1)
+        info["mode"] = "FULL" if "full" in path.lower() else ("TEST" if "test" in path.lower() else "")
+
+        row_re_boot = re.compile(
+            r"^(?P<name>D2|K2|TAKENS|ELLNER|LLE|RR|DET|LAM|MAXLINE|ENTR|TT|TREND)\s+"
+            r"(?P<boot_mean>-?(?:nan|inf|\d+\.\d+))\s+"
+            r"(?P<boot_sd>-?(?:nan|inf|\d+\.\d+))\s+"
+            r"(?P<B>\d+)\s+"
+            r"(?P<orig>-?(?:nan|inf|\d+\.\d+))\s+"
+            r"(?P<resh>-?(?:nan|inf|\d+\.\d+))\s+"
+            r"(?P<normal>-?(?:nan|inf|\d+\.\d+))\s+"
+            r"(?P<tref>-?(?:nan|inf|\d+\.\d+))\s+"
+            r"(?P<TS>-?(?:nan|inf|\d+\.\d+))\s+"
+            r"(?P<absTS>-?(?:nan|inf|\d+\.\d+))\s+"
+            r"(?P<decision>reject H0|fail to reject H0|insufficient data|no sd|not bootstrap-tested)\s*$"
+        )
+        for line in text.splitlines():
+            rm = row_re_boot.match(line.strip())
+            if not rm:
+                continue
+            name = rm.group("name")
+            info["metrics"][name] = {
+                "orig": _parse_float_tok(rm.group("orig")),
+                "std_orig": _parse_float_tok(rm.group("boot_sd")),
+                "mean": _parse_float_tok(rm.group("resh")),
+                "std": float("nan"),
+                "normal": _parse_float_tok(rm.group("normal")),
+                "t_ref": _parse_float_tok(rm.group("tref")),
+                "n": int(rm.group("B")),
+                "boot_mean": _parse_float_tok(rm.group("boot_mean")),
+                "boot_sd": _parse_float_tok(rm.group("boot_sd")),
+                "resh": _parse_float_tok(rm.group("resh")),
+                "TS": _parse_float_tok(rm.group("TS")),
+                "abs_TS": _parse_float_tok(rm.group("absTS")),
+                "F": _parse_float_tok(rm.group("TS")),
+                "score": _parse_float_tok(rm.group("TS")),
+                "pvalue": float("nan"),
+            }
+            info["conclusion"][name] = rm.group("decision")
+        return info
+
+    # Previous hypothesis.py format: one randperm surrogate + normal/t references.
     m = re.search(r"Single-surrogate hypothesis test\s+\(([^)]+)\)", text)
     if m:
         info["format"] = "single_surrogate"
@@ -303,7 +531,7 @@ def _parse_bootstrap_summary(path):
         info["mode"] = "FULL" if "full" in path.lower() else ("TEST" if "test" in path.lower() else "")
 
         row_re_single = re.compile(
-            r"^(?P<name>D2|K2|LLE|RR|DET|LAM|MAXLINE|ENTR|TT)\s+"
+            r"^(?P<name>D2|K2|TAKENS|ELLNER|LLE|RR|DET|LAM|MAXLINE|ENTR|TT|TREND)\s+"
             r"(?P<orig_sd>-?(?:nan|inf|\d+\.\d+))\s+"
             r"(?P<surr_sd>-?(?:nan|inf|\d+\.\d+))\s+"
             r"(?P<n>\d+)\s+"
@@ -577,12 +805,6 @@ def _parse_bootstrap_summary(path):
         if rm:
             info["conclusion"][name] = rm.group(1)
 
-    m = re.search(r"Original T\s*:\s*(.*)", text)
-    if m:
-        info["T_original"] = m.group(1).strip()
-    m = re.search(r"(Bootstrap|Surrogate) T\s*:\s*(.*)", text)
-    if m:
-        info["T_bootstrap"] = m.group(2).strip()
     return info
 
 
@@ -604,10 +826,10 @@ def cmd_boot_aggregate(path, _n=None):
         return
 
     out_path = os.path.join(path, "_hypothesis_aggregate_summary.txt")
-    metric_order = ("D2", "K2", "LLE", "RR", "DET", "LAM", "MAXLINE", "ENTR", "TT")
+    metric_order = ("D2", "TAKENS", "ELLNER", "K2", "LLE", "RR", "DET", "LAM", "MAXLINE", "ENTR", "TT", "TREND")
     # PyRQA scalar metrics: no plateau-window std_orig in hypothesis.py (column is absent / NaN in summaries).
-    RQA_METRICS = ("RR", "DET", "LAM", "MAXLINE", "ENTR", "TT")
-    DKL_METRICS = ("D2", "K2", "LLE")
+    RQA_METRICS = ("RR", "DET", "LAM", "MAXLINE", "ENTR", "TT", "TREND")
+    DKL_METRICS = ("TAKENS", "ELLNER", "LLE")
     parsed_infos = []
     metrics_present = []
     for fp in found:
@@ -616,9 +838,13 @@ def cmd_boot_aggregate(path, _n=None):
             continue
         parsed_infos.append((fp, info))
         metrics_present.extend([k for k in metric_order if k in info.get("metrics", {})])
-    metric_names = tuple(dict.fromkeys(metrics_present)) if metrics_present else ("D2", "K2", "LLE")
+    metric_names = tuple(dict.fromkeys(metrics_present)) if metrics_present else ("TAKENS", "ELLNER", "LLE")
 
-    if parsed_infos and all(info.get("format") == "single_surrogate" for _fp, info in parsed_infos):
+    if parsed_infos and all(
+        info.get("format") in {"single_surrogate", "stationary_bootstrap_ts"}
+        for _fp, info in parsed_infos
+    ):
+        is_stationary = all(info.get("format") == "stationary_bootstrap_ts" for _fp, info in parsed_infos)
         with open(out_path, "w", encoding="utf-8") as fh:
             fh.write("Hypothesis pipeline - aggregated summary\n")
             fh.write(f"Scanned root : {path}\n")
@@ -628,11 +854,18 @@ def cmd_boot_aggregate(path, _n=None):
             w = 11
             header = f"{'Symbol':<8} {'tau':>4} {'W':>3} {'B':>3}"
             for name in metric_names:
-                header += (
-                    f" {f'{name}_orig':>{w}} {f'{name}_orig_sd':>{w}}"
-                    f" {f'{name}_surr':>{w}} {f'{name}_surr_sd':>{w}}"
-                    f" {f'F_{name}':>{w}} {f'p_{name}':>{w}}"
-                )
+                if is_stationary:
+                    header += (
+                        f" {f'{name}_orig':>{w}} {f'{name}_boot':>{w}}"
+                        f" {f'{name}_boot_sd':>{w}} {f'{name}_resh':>{w}}"
+                        f" {f'TS_{name}':>{w}} {f'absTS_{name}':>{w}}"
+                    )
+                else:
+                    header += (
+                        f" {f'{name}_orig':>{w}} {f'{name}_orig_sd':>{w}}"
+                        f" {f'{name}_surr':>{w}} {f'{name}_surr_sd':>{w}}"
+                        f" {f'F_{name}':>{w}} {f'p_{name}':>{w}}"
+                    )
             header += f" {'rej_all':>7}"
             fh.write(header + "\n")
             fh.write("-" * len(header) + "\n")
@@ -644,11 +877,18 @@ def cmd_boot_aggregate(path, _n=None):
                     if not m:
                         row += f" {'nan':>{w}} {'nan':>{w}} {'nan':>{w}} {'nan':>{w}} {'nan':>{w}} {'nan':>{w}}"
                         continue
-                    row += (
-                        f" {m['orig']:>{w}.4f} {m['std_orig']:>{w}.4f}"
-                        f" {m['mean']:>{w}.4f} {m['std']:>{w}.4f}"
-                        f" {m['F']:>{w}.4f} {m['pvalue']:>{w}.4f}"
-                    )
+                    if is_stationary:
+                        row += (
+                            f" {m['orig']:>{w}.4f} {m.get('boot_mean', float('nan')):>{w}.4f}"
+                            f" {m.get('boot_sd', float('nan')):>{w}.4f} {m.get('resh', float('nan')):>{w}.4f}"
+                            f" {m.get('TS', float('nan')):>{w}.4f} {m.get('abs_TS', float('nan')):>{w}.4f}"
+                        )
+                    else:
+                        row += (
+                            f" {m['orig']:>{w}.4f} {m['std_orig']:>{w}.4f}"
+                            f" {m['mean']:>{w}.4f} {m['std']:>{w}.4f}"
+                            f" {m['F']:>{w}.4f} {m['pvalue']:>{w}.4f}"
+                        )
                 rej_all = (
                     "YES"
                     if all(info["conclusion"].get(n) == "reject H0" for n in metric_names)
@@ -657,31 +897,53 @@ def cmd_boot_aggregate(path, _n=None):
                 row += f" {rej_all:>7}"
                 fh.write(row + "\n")
 
-            fh.write(
-                "\nCurrent format: one random-permutation surrogate per series. "
-                "normal and t(3.5) reference values are reported inside each source summary; "
-                "main p-values test H0: Var(T_orig)=Var(T_surr) using a two-sided F-test at alpha=0.01.\n\n"
-            )
+            if is_stationary:
+                fh.write(
+                    "\nCurrent format: stationary-bootstrap TS test. "
+                    "For TAKENS/ELLNER/LLE, boot is the mean across B stationary-bootstrap invariant values, "
+                    "boot_sd is their sample SD, resh is one fully reshuffled invariant, and "
+                    "TS=(boot-resh)/boot_sd. Reject H0 when |TS|>3.\n\n"
+                )
+            else:
+                fh.write(
+                    "\nCurrent format: one random-permutation surrogate per series. "
+                    "normal and t(3.5) reference values are reported inside each source summary; "
+                    "main p-values test H0: Var(T_orig)=Var(T_surr) using a two-sided F-test at alpha=0.01.\n\n"
+                )
 
             for fp, info in parsed_infos:
                 fh.write("=" * 110 + "\n")
                 fh.write(f"Source: {fp}\n")
                 fh.write(f"Symbol: {info['symbol']}   Mode: {info['mode']}   N: {info['n']}\n")
                 fh.write(f"  tau={info['tau']}, W={info['W']}, B={info['B']}\n")
-                fh.write(
-                    f"  {'metric':<8} {'orig':>10} {'orig_sd':>10} {'surr':>10} {'surr_sd':>10} "
-                    f"{'normal':>10} {'t3.5':>10} {'n':>5} {'F':>10} {'p-value':>10}  conclusion\n"
-                )
+                if is_stationary:
+                    fh.write(
+                        f"  {'metric':<8} {'orig':>10} {'boot':>10} {'boot_sd':>10} {'resh':>10} "
+                        f"{'normal':>10} {'t3.5':>10} {'B':>5} {'TS':>10} {'abs_TS':>10}  conclusion\n"
+                    )
+                else:
+                    fh.write(
+                        f"  {'metric':<8} {'orig':>10} {'orig_sd':>10} {'surr':>10} {'surr_sd':>10} "
+                        f"{'normal':>10} {'t3.5':>10} {'n':>5} {'F':>10} {'p-value':>10}  conclusion\n"
+                    )
                 for name in metric_names:
                     m = info["metrics"].get(name, {})
                     con = info["conclusion"].get(name, "n/a")
                     if m:
-                        fh.write(
-                            f"  {name:<8} {m['orig']:>10.4f} {m['std_orig']:>10.4f} "
-                            f"{m['mean']:>10.4f} {m['std']:>10.4f} "
-                            f"{m['normal']:>10.4f} {m['t_ref']:>10.4f} "
-                            f"{m['n']:>5} {m['F']:>10.4f} {m['pvalue']:>10.4f}  {con}\n"
-                        )
+                        if is_stationary:
+                            fh.write(
+                                f"  {name:<8} {m['orig']:>10.4f} {m.get('boot_mean', float('nan')):>10.4f} "
+                                f"{m.get('boot_sd', float('nan')):>10.4f} {m.get('resh', float('nan')):>10.4f} "
+                                f"{m['normal']:>10.4f} {m['t_ref']:>10.4f} "
+                                f"{m['n']:>5} {m.get('TS', float('nan')):>10.4f} {m.get('abs_TS', float('nan')):>10.4f}  {con}\n"
+                            )
+                        else:
+                            fh.write(
+                                f"  {name:<8} {m['orig']:>10.4f} {m['std_orig']:>10.4f} "
+                                f"{m['mean']:>10.4f} {m['std']:>10.4f} "
+                                f"{m['normal']:>10.4f} {m['t_ref']:>10.4f} "
+                                f"{m['n']:>5} {m['F']:>10.4f} {m['pvalue']:>10.4f}  {con}\n"
+                            )
                     else:
                         fh.write(
                             f"  {name:<8} {'nan':>10} {'nan':>10} {'nan':>10} {'nan':>10} "
@@ -757,8 +1019,8 @@ def cmd_boot_aggregate(path, _n=None):
             fh.write(row + "\n")
 
         fh.write(
-            "\nColumn rej_all: YES if every metric in scope rejects H0 at the run alpha (default 0.01). "
-            "DKL scope: requires D2, K2, LLE in the summary. RQA-only scope: requires all listed metrics "
+            "\nColumn rej_all: YES if every metric in scope rejects H0 under the TS threshold. "
+            "DKL scope: requires TAKENS, ELLNER, LLE in the summary. RQA-only scope: requires all listed metrics "
             f"from {RQA_METRICS} only. "
             "Mixed or incomplete scopes: — . "
             "std_orig em dash (—): not defined for PyRQA scalars (hypothesis reports NaN).\n\n"
@@ -803,10 +1065,6 @@ def cmd_boot_aggregate(path, _n=None):
                     fh.write(
                         f"  {name:<6} {'nan':>10} {'nan':>10} {'nan':>12} {'nan':>12} {'nan':>10} {'nan':>9} {'nan':>11}  {con}\n"
                     )
-            if info["T_original"]:
-                fh.write(f"  Predictability T (original) : {info['T_original']}\n")
-            if info["T_bootstrap"]:
-                fh.write(f"  Predictability T (surrogates): {info['T_bootstrap']}\n")
             fh.write("\n")
 
     print(f"  Aggregated hypothesis summary -> {out_path}")
@@ -824,6 +1082,8 @@ HANDLERS = {
     "d2": cmd_d2,
     "h2": cmd_h2,
     "takens": cmd_takens,
+    "ellner_plot_data": cmd_ellner_plot_data,
+    "takens_value": cmd_takens_value,
     "lyap": cmd_lyap,
     "rec": cmd_rec,
     "rqa": cmd_rqa,

@@ -224,12 +224,12 @@ if __name__ == "__main__":
     # We changed a simple list into a list of dictionaries.
     # =========================================================================
     file_settings = [
-        {"file": "BTCUSD_BITSTAMP_1h_complete_logreturns.dat", "tau": 3},
-        {"file": "ETHUSD_BITSTAMP_1h_complete_logreturns.dat", "tau": 4},
-        {"file": "LTCUSD_BITSTAMP_1h_complete_logreturns.dat", "tau": 3},
-        {"file": "XRPUSD_BITSTAMP_1h_complete_logreturns.dat", "tau": 3},
+        {"file": "BTCUSD_BITSTAMP_1h_complete_logreturns.dat", "tau": 5},
+        {"file": "ETHUSD_BITSTAMP_1h_complete_logreturns.dat", "tau": 5},
+        {"file": "LTCUSD_BITSTAMP_1h_complete_logreturns.dat", "tau": 2},
+        {"file": "XRPUSD_BITSTAMP_1h_complete_logreturns.dat", "tau": 2},
         {"file": "LINKUSD_BITSTAMP_1h_complete_logreturns.dat", "tau": 4},
-        {"file": "DOGEUSD_BITSTAMP_1h_complete_logreturns.dat", "tau": 3},
+        {"file": "DOGEUSD_BITSTAMP_1h_complete_logreturns.dat", "tau": 6},
         {"file": "ADAUSD_BITSTAMP_1h_complete_logreturns.dat", "tau": 2}
     ]
 

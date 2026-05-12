@@ -9,12 +9,12 @@ from config_loader import load_config, get_data_dir, get_results_dir, ensure_dir
 # ==========================================================
 M = 3        # Embedding dimension (must be 3 for a 3D graph)
 TAU_BY_SYMBOL = {
-    "BTCUSD": 3,
-    "ETHUSD": 4,
-    "LTCUSD": 3,
-    "XRPUSD": 3,
+    "BTCUSD": 5,
+    "ETHUSD": 5,
+    "LTCUSD": 2,
+    "XRPUSD": 2,
     "LINKUSD": 4,
-    "DOGEUSD": 3,
+    "DOGEUSD": 6,
     "ADAUSD": 2,
 }
 

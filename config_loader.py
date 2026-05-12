@@ -129,19 +129,11 @@ def rqa_params_for_symbol(symbol: str, settings_flat=None):
 
 def prefer_liquidity_cut(file_path):
     """
-    Prefer liquidity-cut file variants when they exist.
+    Legacy compatibility shim.
 
-    Supported naming:
-    - *_logreturns.dat  -> *_logreturns_cut.dat
-    - *_logreturns.csv  -> *_logreturns_cut.csv
+    `liquidity.py` was removed from the active pipeline. Data are now reduced at
+    download time in `crypto_data_all.py` to the latest one-year window, so old
+    `*_logreturns_cut.*` files must not silently override the canonical
+    `*_logreturns.*` files.
     """
-    normalized = os.path.normpath(file_path)
-    cut_candidate = None
-    if normalized.endswith("_logreturns.dat"):
-        cut_candidate = normalized.replace("_logreturns.dat", "_logreturns_cut.dat")
-    elif normalized.endswith("_logreturns.csv"):
-        cut_candidate = normalized.replace("_logreturns.csv", "_logreturns_cut.csv")
-
-    if cut_candidate and os.path.exists(cut_candidate):
-        return cut_candidate
-    return normalized
+    return os.path.normpath(file_path)

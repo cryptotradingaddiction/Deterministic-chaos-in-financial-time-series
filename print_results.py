@@ -12,6 +12,7 @@ KIND is one of:
     takens  PATH                      Takens estimator output (*_takens.dat)
     ellner_plot_data PATH              gnuplot data for Ellner interval estimates
     takens_value PATH                  CSV row with m=3 Ellner value from the Takens plateau
+    eps_range PATH                     print d2 -r/-R range as 0.25*sigma 0.5*sigma
     lyap    PATH                      lyap_k S(t) blocks (*_lyap.txt)
     rqa     PATH                      RQA metrics text file (rqa_values output)
     boot    PATH                      hypothesis.py surrogate-test summary
@@ -242,6 +243,19 @@ def cmd_head(path, n=12):
                 print(f"    {line.rstrip()}")
     except OSError as e:
         print(f"  [WARN] cannot read: {e}")
+
+
+def cmd_eps_range(path, _n=None):
+    """Print the Takens/Ellner d2 radius range used by the batch pipeline."""
+    try:
+        data = np.loadtxt(path, dtype=float)
+        sigma = float(np.std(np.asarray(data, dtype=float), ddof=1))
+    except Exception:
+        sigma = float("nan")
+    if not np.isfinite(sigma) or sigma <= 0.0:
+        print("nan nan")
+        return
+    print(f"{0.25 * sigma:.12g} {0.5 * sigma:.12g}")
 
 
 def _per_m_table(label, blocks, m_start, value_col=1, value_label=None, saturation_label=None):
@@ -1079,6 +1093,7 @@ def cmd_boot_aggregate(path, _n=None):
 HANDLERS = {
     "file": cmd_file,
     "head": cmd_head,
+    "eps_range": cmd_eps_range,
     "d2": cmd_d2,
     "h2": cmd_h2,
     "takens": cmd_takens,

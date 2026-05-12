@@ -168,11 +168,19 @@ REM Keep the standalone diagnostic plots on the same radius interval as
 REM hypothesis.py: the book-oriented Takens/Ellner range is 0.25*sigma..0.5*sigma.
 set "EPS_MIN="
 set "EPS_MAX="
-for /f "usebackq tokens=1,2" %%A in (`"%PYTHON_EXE%" %PYTHON_ARGS% -c "import numpy as np, sys; x=np.loadtxt(sys.argv[1]); s=float(np.std(x, ddof=1)); print(f'{0.25*s:.12g} {0.5*s:.12g}')" "!DATA_FILE!"`) do (
+for /f "tokens=1,2" %%A in ('"%PYTHON_EXE%" %PYTHON_ARGS% "%PRINT_RESULTS%" eps_range "!DATA_FILE!"') do (
     set "EPS_MIN=%%A"
     set "EPS_MAX=%%B"
 )
 echo   Radius range: r_min=!EPS_MIN! r_max=!EPS_MAX! (0.25*sigma .. 0.5*sigma)
+if "!EPS_MIN!"=="" (
+    echo   [ERROR] Failed to compute d2 radius range for !BASE!.
+    exit /b 1
+)
+if /i "!EPS_MIN!"=="nan" (
+    echo   [ERROR] Invalid d2 radius range for !BASE!.
+    exit /b 1
+)
 
 echo   [1/3] d2: correlation sums for Takens/Ellner (+ diagnostic local slopes)...
 "%TISEAN%\d2.exe" -d!TAU_DELAY! -M%EMBED% -t!THEILER_W! -#100 -N0 -r!EPS_MIN! -R!EPS_MAX! -o "!OUT_DIR!\!BASE!" "!DATA_FILE!"

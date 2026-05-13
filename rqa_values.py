@@ -118,7 +118,11 @@ def main():
             radius = float(config_radius)
             radius_source = "config fallback"
 
-        theiler_eff = effective_rqa_theiler(theiler_w)
+        theiler_eff = effective_rqa_theiler(
+            theiler_w,
+            delay=tau,
+            m=RQA_EMBEDDING_DIM,
+        )
 
         print(
             f"Processing {symbol}: N={n_pts}, tau={tau}, "
@@ -141,13 +145,11 @@ def main():
         )
         computation = RQAComputation.create(settings, verbose=False)
         result = computation.run()
-        result.min_diagonal_line_length = 2
-        result.min_vertical_line_length = 2
         trend = compute_rqa_trend(
             data_arr,
             delay=tau,
             radius=radius,
-            theiler=theiler_eff,
+            min_k=theiler_eff,
             m=RQA_EMBEDDING_DIM,
         )
 

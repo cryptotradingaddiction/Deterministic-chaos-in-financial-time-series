@@ -12,7 +12,6 @@ KIND is one of:
     takens  PATH                      Takens estimator output (*_takens.dat)
     ellner_plot_data PATH              gnuplot data for Ellner interval estimates
     takens_value PATH                  CSV row with m=3 Ellner value from the Takens plateau
-    eps_range PATH                     print d2 -r/-R range as 0.25*sigma 0.5*sigma
     lyap    PATH                      lyap_k S(t) blocks (*_lyap.txt)
     rqa     PATH                      RQA metrics text file (rqa_values output)
     boot    PATH                      hypothesis.py surrogate-test summary
@@ -245,19 +244,6 @@ def cmd_head(path, n=12):
         print(f"  [WARN] cannot read: {e}")
 
 
-def cmd_eps_range(path, _n=None):
-    """Print the Takens/Ellner d2 radius range used by the batch pipeline."""
-    try:
-        data = np.loadtxt(path, dtype=float)
-        sigma = float(np.std(np.asarray(data, dtype=float), ddof=1))
-    except Exception:
-        sigma = float("nan")
-    if not np.isfinite(sigma) or sigma <= 0.0:
-        print("nan nan")
-        return
-    print(f"{0.25 * sigma:.12g} {0.5 * sigma:.12g}")
-
-
 def _per_m_table(label, blocks, m_start, value_col=1, value_label=None, saturation_label=None):
     if not blocks:
         print(f"  [WARN] No data blocks ({label})")
@@ -345,7 +331,7 @@ def cmd_ellner_plot_data(path, _n=None):
 
 
 def cmd_takens_value(path, _n=None):
-    """Emit CSV row: filename, Ellner-extension value (eq. 8.78), plateau-point count.
+    """Emit CSV row: filename, Ellner value, plateau count, and plateau bounds.
 
     Detects the plateau on the m=3 d_2^(T)(r') curve, then evaluates the Ellner
     estimate on the sibling .c2 file over the auto-detected [r_min, r_max].
@@ -354,6 +340,8 @@ def cmd_takens_value(path, _n=None):
     blocks = read_blocks(path)
     value = float("nan")
     points = 0
+    r_min = float("nan")
+    r_max = float("nan")
     if len(blocks) >= 3:
         vals, r_min, r_max = _stable_plateau_values(blocks[2], value_col=1)
         vals = vals[np.isfinite(vals)]
@@ -364,7 +352,7 @@ def cmd_takens_value(path, _n=None):
             value = ellner
         elif vals.size:
             value = float(np.mean(vals))
-    print(f"{os.path.basename(path)},{value:.10g},{points}")
+    print(f"{os.path.basename(path)},{value:.10g},{points},{r_min:.10g},{r_max:.10g}")
 
 
 def cmd_lyap(path, _n=None):
@@ -1093,7 +1081,6 @@ def cmd_boot_aggregate(path, _n=None):
 HANDLERS = {
     "file": cmd_file,
     "head": cmd_head,
-    "eps_range": cmd_eps_range,
     "d2": cmd_d2,
     "h2": cmd_h2,
     "takens": cmd_takens,

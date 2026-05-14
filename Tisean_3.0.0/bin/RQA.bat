@@ -79,7 +79,9 @@ for %%F in (%FILES%) do (
         set "FULL_DATA=!CUT_DATA!"
         echo   [INFO] Using liquidity-cut data: !FULL_DATA!
     ) else (
-        echo   [INFO] Using raw data: !FULL_DATA!
+        echo   [ERROR] Required liquidity-cut data missing: !CUT_DATA!
+        echo   [ERROR] Run C:\DCh\liquidity.py before this pipeline.
+        exit /b 1
     )
 
     if /i "%TEST_MODE%"=="true" (
@@ -158,6 +160,10 @@ for %%F in (%FILES%) do (
     set "CUT_DATA=!FULL_DATA:_logreturns.dat=_logreturns_cut.dat!"
     if exist "%DATA_DIR%\!CUT_DATA!" (
         set "FULL_DATA=!CUT_DATA!"
+    ) else (
+        echo [ERROR] Required liquidity-cut data missing: !CUT_DATA!
+        echo [ERROR] Run C:\DCh\liquidity.py before this pipeline.
+        exit /b 1
     )
     if /i "%TEST_MODE%"=="true" (
         set "DATA_FILE=%TMP_ROOT%\tmp_!BASE!%TEST_SUFFIX%.dat"

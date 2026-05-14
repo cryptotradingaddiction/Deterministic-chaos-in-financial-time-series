@@ -24,12 +24,12 @@ files = [
 ]
 
 TAU_BY_SYMBOL = {
-    "BTCUSD": 5,
-    "ETHUSD": 5,
-    "LTCUSD": 2,
-    "XRPUSD": 2,
+    "BTCUSD": 2,
+    "ETHUSD": 2,
+    "LTCUSD": 4,
+    "XRPUSD": 3,
     "LINKUSD": 4,
-    "DOGEUSD": 6,
+    "DOGEUSD": 3,
     "ADAUSD": 2,
 }
 m_values = [2, 3, 4, 5, 10]

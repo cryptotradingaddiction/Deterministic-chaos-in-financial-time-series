@@ -4,9 +4,9 @@ Crypto Hourly Data Downloader with Strict Contiguity Validation
 This script downloads hourly OHLCV data for multiple cryptocurrency pairs from
 Bitstamp (or any CCXT-supported exchange). It performs rigorous checks to ensure
 no single hour is missing within the downloaded range and that the data
-realistically covers the requested date span. After validation, only the last
-year is exported: 8761 hourly candles, which produces exactly 8760 log-return
-values in `compute_logreturns.py`.
+realistically covers the requested date span. After validation, the full
+contiguous downloaded range is exported; downstream scripts then compute
+log-returns and `liquidity.py` applies the final liquid analysis window.
 """
 
 import ccxt
@@ -30,11 +30,6 @@ EXCHANGE_ID = 'bitstamp'
 
 # Timeframe for the OHLCV candles. '1h' requests hourly bars.
 TIMEFRAME = '1h'
-
-# Keep one year of hourly log-return values downstream. Since log-returns are
-# first differences of close prices, 8760 returns require 8761 OHLCV candles.
-TARGET_LOGRETURN_HOURS = 8760
-EXPORT_CANDLE_ROWS = TARGET_LOGRETURN_HOURS + 1
 
 # Dictionary mapping trading pair symbols to the earliest date Bitstamp
 # officially started trading that pair. These dates are based on public
@@ -249,22 +244,12 @@ def download_hourly_data(symbol: str,
     if df['datetime'].min() > expected_start_date:
         print(f"[INFO] Note: Data starts at {df['datetime'].min()}, not at 00:00. This is normal for newly listed pairs.")
 
-    # If we reach this point, all checks have passed. Export only the latest
-    # year-sized window so downstream invariant computations stay tractable.
-    original_len = len(df)
-    if original_len > EXPORT_CANDLE_ROWS:
-        df = df.tail(EXPORT_CANDLE_ROWS).copy()
-        df.reset_index(drop=True, inplace=True)
-        print(
-            f"[OK] Data validated over {original_len} hours; exporting last "
-            f"{EXPORT_CANDLE_ROWS} candles ({TARGET_LOGRETURN_HOURS} downstream log-returns) "
-            f"from {df['datetime'].min()} to {df['datetime'].max()}."
-        )
-    else:
-        print(
-            f"[OK] Data is complete and contiguous, but has only {original_len} hours; "
-            f"exporting all available rows."
-        )
+    # If we reach this point, all checks have passed. Export the full contiguous
+    # range; log-return and liquidity-cut scripts decide the final analysis window.
+    print(
+        f"[OK] Data validated over {len(df)} hours; exporting full range "
+        f"from {df['datetime'].min()} to {df['datetime'].max()}."
+    )
     return df
 
 

@@ -84,7 +84,9 @@ for %%F in (%FILES%) do (
         set "FULL_DATA=!CUT_DATA!"
         echo   [INFO] Using liquidity-cut data: !FULL_DATA!
     ) else (
-        echo   [INFO] Using raw data: !FULL_DATA!
+        echo   [ERROR] Required liquidity-cut data missing: !CUT_DATA!
+        echo   [ERROR] Run C:\DCh\liquidity.py before this pipeline.
+        exit /b 1
     )
 
     if /i "%TEST_MODE%"=="true" (

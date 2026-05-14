@@ -129,11 +129,22 @@ def rqa_params_for_symbol(symbol: str, settings_flat=None):
 
 def prefer_liquidity_cut(file_path):
     """
-    Legacy compatibility shim.
+    Prefer liquidity-cut log-return files when they exist.
 
-    `liquidity.py` was removed from the active pipeline. Data are now reduced at
-    download time in `crypto_data_all.py` to the latest one-year window, so old
-    `*_logreturns_cut.*` files must not silently override the canonical
-    `*_logreturns.*` files.
+    The active pipeline uses `liquidity.py` outputs so all downstream programs
+    analyse the same liquid time window. Callers pass the canonical
+    `*_logreturns.csv` or `*_logreturns.dat` path; this helper redirects to the
+    sibling `*_logreturns_cut.*` file when available.
     """
-    return os.path.normpath(file_path)
+    normalized = os.path.normpath(file_path)
+    cut_path = normalized
+    if "_logreturns." in normalized:
+        cut_path = normalized.replace("_logreturns.", "_logreturns_cut.")
+    if os.path.exists(cut_path):
+        return os.path.normpath(cut_path)
+    if cut_path != normalized:
+        raise FileNotFoundError(
+            f"Required liquidity-cut data file is missing: {cut_path}. "
+            "Run C:\\DCh\\liquidity.py before this pipeline."
+        )
+    return normalized

@@ -281,9 +281,9 @@ Output example:
 - `BTCUSD_BITSTAMP_1h_complete.csv`
 
 `crypto_data_all.py` validates the full downloaded hourly history for
-contiguity, then exports only the last **8761** hourly candles. This is
-intentional: `compute_logreturns.py` needs one previous close, so 8761 candles
-produce exactly **8760** hourly log-return values (one year) per coin.
+contiguity, then exports the complete contiguous Bitstamp range for each coin.
+The final analysis window is not chosen here; it is selected later by
+`liquidity.py` after log-returns have been computed.
 
 ### Step 2 - Compute logreturns
 
@@ -554,7 +554,7 @@ Written under `paths.results_dir/mutual/`:
 ### Inputs and data selection
 
 - Hard-coded list of seven `*_BITSTAMP_1h_complete_logreturns.dat` names (edit in `if __name__ == "__main__"` block).
-- **Data length**: inputs are the canonical `*_logreturns.dat` files. `liquidity.py` was removed from the active pipeline; `crypto_data_all.py` now exports only enough candles for exactly **8760** downstream log-return values, and `prefer_liquidity_cut` is retained only as a no-op compatibility shim.
+- **Data length**: `crypto_data_all.py` exports the full contiguous Bitstamp range. `compute_logreturns.py` computes log-returns for that full range, and `liquidity.py` creates the active `*_logreturns_cut.*` files from the first liquid timestamp through `2026-05-02 20:00:00`. `prefer_liquidity_cut` redirects callers to those cut files and fails if they are missing.
 
 ### How to run
 

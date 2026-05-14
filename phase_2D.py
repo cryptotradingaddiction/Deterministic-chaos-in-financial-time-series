@@ -9,12 +9,12 @@ from config_loader import load_config, get_data_dir, get_results_dir, ensure_dir
 # ==========================================================
 # Individual tau values per symbol (can be tuned independently).
 TAU_BY_SYMBOL = {
-    "BTCUSD": 5,
-    "ETHUSD": 5,
-    "LTCUSD": 2,
-    "XRPUSD": 2,
+    "BTCUSD": 2,
+    "ETHUSD": 2,
+    "LTCUSD": 4,
+    "XRPUSD": 3,
     "LINKUSD": 4,
-    "DOGEUSD": 6,
+    "DOGEUSD": 3,
     "ADAUSD": 2,
 }
 

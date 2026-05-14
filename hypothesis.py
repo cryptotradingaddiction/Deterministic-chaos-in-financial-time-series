@@ -128,6 +128,8 @@ T_DOF = 3.5
 # Must match -M1,3 in correlation_dimension.bat
 M_D2 = 3
 M_LYAP = 3
+MIN_LYAP_LINEAR_POINTS = 3  # was 5; financial S(t) linear region is ~1-2 iterations
+MIN_LYAP_NEIGHBORS = 10
 
 DEFAULT_RQA_RADIUS = 0.005
 RQA_EMBEDDING_DIM = 3
@@ -567,22 +569,18 @@ def compute_ellner_from_c2(c2_file, r_min, r_max, dim=M_D2):
     return float((c_max - c_min) / integral)
 
 
-MIN_LYAP_LINEAR_POINTS = 5
+def _best_linear_slope_window(x, y, min_points=MIN_LYAP_LINEAR_POINTS):
+    """Return (slope, t_lo, t_hi, intercept) for the Kantz S(t) linear window.
 
-
-def _best_linear_slope(x, y, min_points=MIN_LYAP_LINEAR_POINTS):
-    """Pick slope from the contiguous (x, y) window with maximal |rho|.
-
-    Used for the Lyapunov S(t) curve: the book defines lambda_max as the slope
-    of the linear part of S(t) vs t. Instead of fixing t in [2, 10), we scan
-    every contiguous window of at least `min_points` and keep the slope from
-    the window with the highest absolute Pearson correlation.
+    Same window rule as `_best_linear_slope`: longest contiguous segment with
+    |rho| >= 0.99, else fallback to the segment with largest |rho|.
+    The line is S(t) = slope * t + intercept over t in [t_lo, t_hi].
     """
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
     n = min(len(x), len(y))
     if n < min_points:
-        return np.nan
+        return (np.nan, np.nan, np.nan, np.nan)
     x = x[:n]
     y = y[:n]
     finite = np.isfinite(x) & np.isfinite(y)
@@ -590,108 +588,188 @@ def _best_linear_slope(x, y, min_points=MIN_LYAP_LINEAR_POINTS):
     y = y[finite]
     n = len(x)
     if n < min_points:
-        return np.nan
-    # Book connection:
-    # Equation (8.94) states that nearby reconstructed states should separate
-    # approximately exponentially under chaotic dynamics:
-    #
-    #   ||X_i(t+t0) - X_j(t+t0)|| ~= exp(lambda_max * t)
-    #                                  ||X_i(t0) - X_j(t0)||
-    #
-    # Equation (8.95) then defines S(t) as an average log-distance growth over
-    # reference states and their neighbourhoods. If an exponential-growth region
-    # is present, S(t) is approximately linear in t, and the slope is lambda_max.
-    #
-    # The book examples show that the linear part can occupy different iteration
-    # ranges for different systems and embedding dimensions. Therefore, scanning
-    # every contiguous window is safer than hard-coding a fixed t interval.
-    # We choose the window with the largest absolute Pearson correlation and use
-    # its fitted slope as the LLE estimate.
-    best_slope = np.nan
-    best_rho = -np.inf
-    best_width = 0
+        return (np.nan, np.nan, np.nan, np.nan)
+
+    R2_THRESHOLD = 0.99
+    win_thresh = None  # (start, width, slope, intercept)
+    best_len_thresh = 0
+    win_fb = None
+    best_rho_fallback = -np.inf
+
     for width in range(min_points, n + 1):
         for start in range(0, n - width + 1):
-            stop = start + width
-            xs = x[start:stop]
-            ys = y[start:stop]
+            xs = x[start:start + width]
+            ys = y[start:start + width]
             rho = _pearson_abs(xs, ys)
             if not np.isfinite(rho):
                 continue
             try:
-                slope, _ = np.polyfit(xs, ys, 1)
+                coeffs = np.polyfit(xs, ys, 1)
+                slope = float(coeffs[0])
+                intercept = float(coeffs[1])
             except Exception:
                 continue
             if not np.isfinite(slope):
                 continue
-            if (rho, width) > (best_rho, best_width):
-                best_rho = rho
-                best_width = width
-                best_slope = float(slope)
-    return best_slope
+            if rho >= R2_THRESHOLD and width > best_len_thresh:
+                best_len_thresh = width
+                win_thresh = (start, width, slope, intercept)
+            if rho > best_rho_fallback:
+                best_rho_fallback = rho
+                win_fb = (start, width, slope, intercept)
+
+    win = win_thresh if win_thresh is not None else win_fb
+    if win is None:
+        return (np.nan, np.nan, np.nan, np.nan)
+    start, width, slope, intercept = win
+    t_lo = float(x[start])
+    t_hi = float(x[start + width - 1])
+    return (float(slope), t_lo, t_hi, float(intercept))
 
 
-def extract_lle_mean_std(lyap_file):
-    """Largest Lyapunov estimate: slope of S(t) for the first m=3 epsilon block.
+def _best_linear_slope(x, y, min_points=MIN_LYAP_LINEAR_POINTS):
+    """Slope from the longest contiguous window with |r| above threshold.
 
-    lyap_k can output several epsilon blocks for the same embedding dimension.
-    To keep LLE a single scalar, consistent with the thesis design, we take the
-    first m=3 block and fit its best linear segment. There is no within-invariant
-    vector here, so SD is reported as NaN and n as 1.
+    Threshold-based: take the longest window with |r| >= 0.99 rather than
+    chasing the single maximum |r| window, which can land in saturation.
+    Falls back to max |r| if no window meets threshold.
     """
-    # The .lyap output contains blocks whose data rows are:
-    #   column 1: iteration t,
-    #   column 2: S(t), the averaged logarithmic stretching factor,
-    #   column 3: number of contributing points.
-    #
-    # We use column 2 versus column 1 because equation (8.95) defines S(t), and
-    # the paragraph after that equation states that the slope of the linear part
-    # of S(t) is the largest Lyapunov exponent. This is why the code does not
-    # average slopes over all epsilon blocks or all dimensions: the thesis uses
-    # one scalar Kantz estimate for m=3.
+    slope, _t0, _t1, _b = _best_linear_slope_window(x, y, min_points)
+    return slope
+
+
+def _parse_lyap_blocks(lyap_file, dim=M_LYAP):
+    """Parse ALL epsilon blocks for given dim from lyap_k output.
+
+    Returns list of dicts: [{'eps': float, 'n_neighbors': int, 'data': ndarray(T,2)}]
+    data[:,0] = iteration t, data[:,1] = S(t)
+    n_neighbors = median of column 3 across rows (how many neighbors contributed).
+    """
+    blocks = []
+    current_dim = None
+    current_eps = np.nan
+    current_rows = []
+
+    def _flush():
+        if current_dim == dim and current_rows:
+            arr = np.array(current_rows, dtype=float)
+            n_nbrs = int(np.median(arr[:, 2])) if arr.shape[1] >= 3 else 0
+            blocks.append(
+                {
+                    "eps": current_eps,
+                    "n_neighbors": n_nbrs,
+                    "data": arr[:, :2],
+                }
+            )
+
     try:
-        with open(lyap_file, "r", encoding="utf-8", errors="ignore") as handle:
-            lines = handle.readlines()
-        first_block = None
-        current_block = []
-        current_dim = None
-        for line in lines:
-            stripped = line.strip()
-            if stripped.startswith("#epsilon"):
-                # A new lyap_k block starts. If the previous block was the first
-                # m=3 block with data, stop immediately; later epsilon blocks
-                # are deliberately ignored.
-                if current_dim == M_LYAP and current_block:
-                    first_block = np.array(current_block, dtype=float)
-                    break
-                current_dim = None
-                current_block = []
-                tokens = stripped.replace("=", " ").split()
-                for idx, token in enumerate(tokens):
-                    if token.lower() == "dim" and idx + 1 < len(tokens):
-                        try:
-                            current_dim = int(float(tokens[idx + 1]))
-                        except ValueError:
-                            current_dim = None
-                        break
-                continue
-            if stripped.startswith("#") or stripped == "":
-                continue
-            if current_dim != M_LYAP:
-                continue
-            parts = stripped.split()
-            if len(parts) >= 2:
-                current_block.append([float(parts[0]), float(parts[1])])
-        if first_block is None and current_dim == M_LYAP and current_block:
-            first_block = np.array(current_block, dtype=float)
-        if first_block is None or first_block.size == 0 or first_block.ndim < 2:
-            return np.nan, np.nan, 0
-        slope = _best_linear_slope(first_block[:, 0], first_block[:, 1])
-        if not np.isfinite(slope):
-            return np.nan, np.nan, 0
-        return slope, np.nan, 1
+        with open(lyap_file, "r", encoding="utf-8", errors="ignore") as fh:
+            for line in fh:
+                stripped = line.strip()
+                if stripped.startswith("#epsilon"):
+                    _flush()
+                    current_dim = None
+                    current_eps = np.nan
+                    current_rows = []
+                    parts = stripped.split()
+                    for i, tok in enumerate(parts):
+                        tlow = tok.lower()
+                        if tlow.startswith("#epsilon") or tlow.startswith("epsilon"):
+                            if i + 1 < len(parts):
+                                try:
+                                    current_eps = float(parts[i + 1])
+                                except ValueError:
+                                    pass
+                        if tlow.startswith("dim"):
+                            if i + 1 < len(parts):
+                                try:
+                                    current_dim = int(float(parts[i + 1]))
+                                except ValueError:
+                                    pass
+                    continue
+                if stripped.startswith("#") or stripped == "":
+                    continue
+                if current_dim != dim:
+                    continue
+                parts = stripped.split()
+                if len(parts) >= 2:
+                    try:
+                        row = [float(p) for p in parts[:3]]
+                        if len(row) == 2:
+                            row.append(0.0)
+                        current_rows.append(row)
+                    except ValueError:
+                        continue
+        _flush()
     except Exception:
+        pass
+    return blocks
+
+
+def extract_lle_mean_std(lyap_file, min_neighbors=MIN_LYAP_NEIGHBORS):
+    """LLE as median slope across all usable epsilon blocks for m=3.
+
+    Faithful to the TISEAN paper (Hegger, Kantz, Schreiber 1999, Fig. on CO laser):
+    the Lyapunov exponent is the slope of S(t) in the region where curves for
+    different epsilon values overlap and grow linearly. Using the median slope
+    across multiple epsilon blocks operationalizes the 'overlap' criterion
+    without requiring manual visual inspection.
+
+    Blocks with median n_neighbors < min_neighbors are excluded because their
+    inner sum in S(t) is dominated by fluctuations (too few neighbors to average).
+    This corresponds to the paper's recommendation to exclude reference points
+    with very few neighbors.
+
+    Returns:
+        (median_slope, std_slope, n_usable_blocks)
+        std_slope is the spread across epsilon blocks - a real uncertainty estimate.
+        Returns (NaN, NaN, 0) if no usable blocks found.
+    """
+    blocks = _parse_lyap_blocks(lyap_file, dim=M_LYAP)
+    if not blocks:
         return np.nan, np.nan, 0
+
+    slopes = []
+    for blk in blocks:
+        if blk["n_neighbors"] < min_neighbors:
+            logger.debug(
+                "lyap block eps=%.6g skipped: n_neighbors=%d < %d",
+                blk["eps"],
+                blk["n_neighbors"],
+                min_neighbors,
+            )
+            continue
+        data = blk["data"]
+        if data.shape[0] < 3:
+            continue
+        slope = _best_linear_slope(data[:, 0], data[:, 1])
+        if np.isfinite(slope):
+            slopes.append(slope)
+
+    # Fallback: if all blocks fail the neighbor filter, use them all with a warning
+    if not slopes:
+        logger.warning(
+            "extract_lle_mean_std: no block passed n_neighbors>=%d in %s; using all blocks",
+            min_neighbors,
+            lyap_file,
+        )
+        for blk in blocks:
+            data = blk["data"]
+            if data.shape[0] < 3:
+                continue
+            slope = _best_linear_slope(data[:, 0], data[:, 1])
+            if np.isfinite(slope):
+                slopes.append(slope)
+
+    if not slopes:
+        return np.nan, np.nan, 0
+
+    arr = np.array(slopes, dtype=float)
+    return (
+        float(np.median(arr)),
+        float(np.std(arr, ddof=1)) if len(arr) > 1 else np.nan,
+        int(len(arr)),
+    )
 
 
 def compute_percentile_radius(
@@ -1439,6 +1517,21 @@ def main():
             line = f"  {metric:<10}: {decisions[metric]}"
             fh.write(line + "\n")
             print(line)
+
+    if "LLE" in metric_names:
+        try:
+            from plot_lyap_k_output import plot_orig_lle_fit
+
+            run_dir = os.path.dirname(os.path.abspath(args.output_dir))
+            cand_lyap = os.path.join(run_dir, f"{args.base}_lyap.txt")
+            if os.path.isfile(cand_lyap):
+                out_png = os.path.join(args.output_dir, f"{args.base}_lyap_lle_fit.png")
+                plot_orig_lle_fit(cand_lyap, out_png)
+                print(f"  -> LLE diagnostic plot written to {out_png}")
+            else:
+                logger.warning("LLE plot skipped: missing %s", cand_lyap)
+        except Exception:
+            logger.exception("Failed to write LLE diagnostic plot")
 
     print(f"\n  -> Summary written to {summary_file}")
 

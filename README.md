@@ -21,7 +21,7 @@ This project combines:
 &nbsp;
 
 ## Table of Contents
-
+- [Theoretical Foundations](#Theoretical-Foundations)
 - [Project Scope](#project-scope)
 - [Current Architecture (Important)](#current-architecture-important)
 - [Quick Start](#quick-start)

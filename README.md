@@ -362,15 +362,15 @@ call set "COIN_TAU=%%TAU_LLE_!BASE!%%"
 
 In a batch file, **`%%` prints one literal `%` character** (and does **not** expand `%2` as “second script argument”). So **`-%%2`** is broken apart as: `-`, then **`%%` → `%`**, then **`2`** → the executable sees the flag **`- %2`** in TISEAN’s sense (**percentage / subsampling factor 2** → keep **2%** of recurrence pairs). If you typed `- %2` with only one `%`, CMD would try to treat `%2` as the batch file’s second argument instead of passing a percent sign to `recurr.exe`.
 
+&nbsp;
+&nbsp;
+&nbsp;
 
 ### Where PowerShell appears
 
 Some steps call **`powershell -NoProfile -Command "..."`** to trim the first **`DCH_TEST_POINTS`** lines (default **100**) in test mode. Quotes inside that string use **`!FULL_DATA!`** (delayed expansion) so paths survive the nested quoting. All TISEAN `.bat` files include **`_dch_test_env.bat`** for shared test defaults.
 
 ---
-&nbsp;
-&nbsp;
-&nbsp;
 &nbsp;
 &nbsp;
 &nbsp;

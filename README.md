@@ -23,6 +23,7 @@ This project combines:
 ## Table of Contents
 - [Theoretical Foundations](#Theoretical-Foundations)
 - [Project Scope](#project-scope)
+- [Calculation pipeline (math → code)](#calculation-pipeline-math--code)
 - [Current Architecture (Important)](#current-architecture-important)
 - [Quick Start](#quick-start)
 - [Windows CMD primer (batch files)](#windows-cmd-primer-batch-files) *(collapsible)*
@@ -158,6 +159,144 @@ flowchart TB
   J --> I
   I --> K
 ```
+
+---
+&nbsp;
+&nbsp;
+&nbsp;
+
+## Calculation pipeline (math → code)
+
+This section is the **method-first map**: each quantity used in the thesis pipeline, where it is defined mathematically, and the **exact function or executable** that computes it. Shared embedding parameters ($\tau$, $W$, $m=3$) come from `Tisean_3.0.0/bin/_per_coin_settings.bat` after `mutual.py` and `theilers_w.bat`; verify with `py -3 audit_invariant_parameters.py`.
+
+### Shared inputs and parameters
+
+| Object | Role | Computation |
+|--------|------|-------------|
+| Log-return series $r_t$ | Analysis signal (no z-score in invariant path) | `compute_logreturns.py` → `liquidity.py` writes `*_logreturns_cut.dat` when configured |
+| Embedding delay $\tau$ | Takens delay for all formal invariants | First MI minimum: `mutual.py` → `mi_fraser_swinney`, `find_first_minimum`, `process_file` → `mutual/_mi_summary.txt` → `config_loader.sync_per_coin_bat_tau_from_mutual_summary` → `TAU_D2_*`, `TAU_LLE_*`, `TAU_RQA_*` |
+| Theiler window $W$ | Excludes temporally correlated pairs ($\|i-j\|\le W$ in TISEAN) | **Project rule $W := \tau$:** `theilers_w.bat` (`corr.exe`, `stp.exe`, optional `detect_theiler.py` diagnostics) → `config_loader.sync_per_coin_bat_w_d2_from_theiler_summary` sets `W_D2_<sym> = TAU_D2_<sym>` |
+| Embedding dimension $m$ | State-space dimension for invariants | Fixed **$m=3$:** `hypothesis_config.M_D2`, `M_LYAP`, `RQA_EMBEDDING_DIM`; bat `-M1,3` / `lyap_k -m3 -M3` / `recurr -m1,3` |
+| $\mu_r$, $\sigma_r$ | Mean and SD of original log-returns (reference series only) | `hypothesis_cli.py` (`load_data` → `np.mean` / `np.std(ddof=1)`) |
+
+**Series loading for all in-memory hypothesis runs:** `surrogate_sampling.load_series_1d` ← `tisean_io.load_data`.
+
+---
+
+### Correlation dimension (TAKENS & ELLNER)
+
+| Object | Math / book ref. | Code path |
+|--------|------------------|-----------|
+| Correlation sum $C^{(m)}(r)$ | Grassberger–Procaccia integral | **TISEAN** `d2.exe` via `tisean_io.run_d2` (`-dτ -M1,3 -tW`); batch: `correlation_dimension.bat` |
+| Takens curve $d_2^{(T)}(r')$ | Eqs. 8.75–8.76 | **TISEAN** `c2t.exe` via `tisean_io.run_c2t` → `*_takens.dat` |
+| Plateau on $\ln r'$ | Stable scaling region (after 8.77) | `invariants_correlation.select_plateau_values` ← `extract_takens_plateau` ← `tisean_io.extract_tagged_block(..., tag="#m")` |
+| **TAKENS** | Mean of $d_2^{(T)}$ on plateau at $m=3$ | `invariants_correlation.extract_takens_plateau` → `invariants_compute.compute_invariants` (metric key `TAKENS`) |
+| $r_{\min}, r_{\max}$ | Plateau endpoints | Returned by `extract_takens_plateau` |
+| **ELLNER** $d_2^{(E)}$ | Eq. 8.78 on $[r_{\min}, r_{\max}]$ | `invariants_correlation.compute_ellner_from_c2` (trapezoid on `.c2` block `#dim=3`) → `compute_invariants` (`ELLNER`) |
+| Hypothesis orchestration | CLI + bootstrap loop | `hypothesis.py` → `hypothesis_cli.main`; batch: `correlation_dimension.bat` → `--metrics_list %DCH_DIMENSION_METRICS%` |
+
+---
+
+### Largest Lyapunov exponent (LLE)
+
+| Object | Math / book ref. | Code path |
+|--------|------------------|-----------|
+| Divergence curves $S(t)$ | Kantz / TISEAN `lyap_k` (eq. 8.94–8.95) | **TISEAN** `lyap_k.exe` via `tisean_io.run_lyap_k` (`-dτ -m3 -M3 -tW`); batch: `Lambda_max.bat` |
+| **LLE** | Median linear slope of $S(t)$ over usable $\varepsilon$-blocks at $m=3$ | `invariants_lyapunov.extract_lle_mean_std` ← `_parse_lyap_blocks` / `_best_linear_slope` → `compute_invariants` (`LLE`) |
+| LLE diagnostic plot | Visual check of linear region | `plot_lyap_k_output.plot_orig_lle_fit` (called from `hypothesis_cli.main` when `LLE` in metrics) |
+
+---
+
+### Recurrence quantification (RQA)
+
+| Object | Math / ref. | Code path |
+|--------|-------------|-----------|
+| Recurrence radius $r$ | $p$-th percentile of embedded pairwise distances (default $p=4\%$) | `invariants_rqa.compute_percentile_radius` ← `rqa_radius.py` (stdout for `RQA.bat`); hypothesis: locked after orig run in `hypothesis_cli.main` |
+| Embedded states | $m=3$, delay $\tau$ | `invariants_rqa.embed_series` |
+| TISEAN recurrence plot | Diagnostic RP | **TISEAN** `recurr.exe` in `RQA.bat` (`-m1,3 -dτ -tW -r`) |
+| PyRQA **RR, DET, LAM, MAXLINE, ENTR, TT** | Standard RQA scalars | `invariants_rqa.compute_pyrqa_metrics` (PyRQA `RQAComputation`; `theiler_corrector = W+1` via `tisean_theiler_min_diagonal_k`) |
+| **TREND** | Slope of diagonal recurrence density vs $k$ | `invariants_rqa.compute_rqa_trend` |
+| Batch RQA table (no bootstrap) | Per-coin metrics file | `rqa_values.py` (reads `config_loader.rqa_params_for_symbol`) |
+
+---
+
+### Surrogates, bootstrap, and test statistic
+
+| Object | Definition | Code path |
+|--------|------------|-----------|
+| Reshuffle surrogate | i.i.d. permutation of observations | `hypothesis_surrogates.generate_single_surrogate` |
+| Gaussian reference | $\mathcal{N}(\mu_r,\sigma_r)$, length $n$ | `hypothesis_surrogates.generate_normal_series` |
+| Student-$t$ reference | $t_{\nu=3.5}$ scaled to $(\mu_r,\sigma_r)$ | `hypothesis_surrogates.generate_t_series` (`hypothesis_config.T_DOF`) |
+| Stationary bootstrap replicates | Politis–Romano block resampling; block length $\sqrt{n}$ if unset | `surrogate_sampling.stationary_bootstrap_samples` ← `hypothesis_cli.main` (env `DCH_STATIONARY_BLOCK_MEAN`, default via `hypothesis_config.DEFAULT_STATIONARY_BLOCK_MEAN`) |
+| $\overline{T}_{\mathrm{boot}}$, $s_{\mathrm{boot}}$ | Mean and sample SD over $B$ bootstrap invariant values | `hypothesis_cli.main` (loop over `compute_invariants` on each bootstrap series) |
+| $T_{\mathrm{resh}}$ | Invariant on reshuffled series | Same `compute_invariants` on `surr` label |
+| **TS** | $(\overline{T}_{\mathrm{boot}} - T_{\mathrm{resh}}) / s_{\mathrm{boot}}$ | `hypothesis_ts.invariant_bootstrap_ts_test` |
+| Decision | Reject $H_0$ if $\|\mathrm{TS}\| > 3$ | Same function; threshold `hypothesis_config.DEFAULT_TS_THRESHOLD` / `--ts_threshold` |
+| Summary table | Machine-readable per-coin output | `hypothesis_cli.main` writes `*_surrogate_summary.txt`; aggregate: `print_results.py boot_aggregate` |
+
+**Bootstrap count $B$:** default `hypothesis_config.DEFAULT_BOOTSTRAP_SAMPLES` (100); override `DCH_BOOTSTRAP_SAMPLES` or `--bootstrap_samples` (bat passes via `_dch_hypothesis_cli_extra.bat`).
+
+---
+
+### End-to-end call graph (formal invariants only)
+
+```mermaid
+flowchart LR
+  subgraph params["Parameters"]
+    M["mutual.py → τ"]
+    T["theilers_w.bat → W:=τ"]
+    B["_per_coin_settings.bat"]
+  end
+  subgraph compute["Invariant values"]
+    D2["tisean_io.run_d2 + run_c2t"]
+    TP["extract_takens_plateau"]
+    EL["compute_ellner_from_c2"]
+    LK["tisean_io.run_lyap_k"]
+    LE["extract_lle_mean_std"]
+    RQ["compute_pyrqa_metrics"]
+  end
+  subgraph test["Inference"]
+    CI["hypothesis_cli.main"]
+    TS["invariant_bootstrap_ts_test"]
+  end
+  M --> B
+  T --> B
+  B --> D2 --> TP --> EL
+  B --> LK --> LE
+  B --> RQ
+  TP --> CI
+  EL --> CI
+  LE --> CI
+  RQ --> CI
+  CI --> TS
+```
+
+`invariants_compute.compute_invariants` is the **single dispatcher** used inside `hypothesis_cli` for every series label (`orig`, `surr`, `normal`, `t*`, bootstrap).
+
+---
+
+### Diagnostics (not in the bootstrap TS table)
+
+These scripts inform $\tau$ or exploratory geometry; they are **not** mixed into the formal TS decision unless you explicitly reuse their outputs in `.bat`.
+
+| Object | Purpose | Code path |
+|--------|---------|-----------|
+| Mutual information $I(\tau)$ | Choose $\tau$ | `mutual.py` (`mi_fraser_swinney`, `find_first_minimum`) |
+| Cao $E_1(m)$, $E_2(m)$ | Embedding dimension hint | `cao_.py` (Chebyshev NN, $m=1\ldots d_{\max}$) |
+| Capacity dimension $D_c$ | Box-counting sweep | `2dc.py` (min–max normalized coordinates per $m$) |
+| Decorrelation time $\tau_w$ | Separate heuristic (not $\tau$ for TISEAN) | `tau_w.py` |
+| Phase portraits | Visualization | `phase_2D.py`, `phase_3D.py` |
+
+---
+
+### One-line entry points by batch script
+
+| Batch script | Primary math outputs | Python entry |
+|--------------|---------------------|--------------|
+| `correlation_dimension.bat` | TAKENS, ELLNER (+ gnuplot) | `hypothesis.py` with `--metrics_list` from `DCH_DIMENSION_METRICS` |
+| `Lambda_max.bat` | LLE | `hypothesis.py --metrics_list LLE` |
+| `RQA.bat` | RR, DET, LAM, … | `rqa_radius.py` → `recurr.exe` → `rqa_values.py` → `hypothesis.py` (fixed $r$) |
+| `hypothesis.bat` | All of the above | Sequences the three bats + `print_results.py` + `documents.py` |
 
 ---
 &nbsp;

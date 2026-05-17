@@ -142,6 +142,9 @@ def extract_tagged_block(path, dim=M_D2, tag="#dim"):
 
     The first column is always the scale r (or r'), and the second column is the
     metric value at that scale. Higher columns, if present, are ignored here.
+
+    On parse failure returns an empty array; callers must treat empty/NaN as
+    "invariant unavailable" (see :func:`hypothesis_ts.invariant_bootstrap_ts_test`).
     """
     rows = []
     current_dim = None

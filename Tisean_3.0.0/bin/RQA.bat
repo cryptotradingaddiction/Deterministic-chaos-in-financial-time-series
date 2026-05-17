@@ -1,6 +1,7 @@
 @echo off
 setlocal enabledelayedexpansion
 call "%~dp0_dch_test_env.bat"
+call "%~dp0_dch_hypothesis_cli_extra.bat"
 
 REM ============================================================================
 REM RQA PIPELINE (recurrence + RQA metrics, all files)
@@ -127,7 +128,7 @@ for %%F in (%FILES%) do (
         set "HYP_DIR=!RUN2_DIR!\hypothesis_rqa"
         if not exist "!HYP_DIR!" mkdir "!HYP_DIR!"
         echo   [Hypothesis] RQA bootstrap TS test ^(tau=!COIN_TAU!, r=!COIN_RAD_EFF! fixed from rqa_radius.py, W=!COIN_W!^)
-        "%PYTHON_EXE%" %PYTHON_ARGS% "C:\DCh\hypothesis.py" --input "!DATA_FILE!" --base "!BASE!" --delay !COIN_TAU! --theiler !COIN_W! --rqa_radius !COIN_RAD_EFF! --rqa_radius_mode fixed --output_dir "!HYP_DIR!" --test_mode "%TEST_MODE%" --metrics_list "RR,DET,LAM,MAXLINE,ENTR,TT,TREND"
+        "%PYTHON_EXE%" %PYTHON_ARGS% "C:\DCh\hypothesis.py" --input "!DATA_FILE!" --base "!BASE!" --delay !COIN_TAU! --theiler !COIN_W! --rqa_radius !COIN_RAD_EFF! --rqa_radius_mode fixed --output_dir "!HYP_DIR!" --test_mode "%TEST_MODE%" --metrics_list "RR,DET,LAM,MAXLINE,ENTR,TT,TREND" !DCH_HYP_EXTRA!
         if errorlevel 1 exit /b 1
         "%PYTHON_EXE%" %PYTHON_ARGS% "%PRINT_RESULTS%" boot "!HYP_DIR!\!BASE!_surrogate_summary.txt"
     ) else (

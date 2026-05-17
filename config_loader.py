@@ -46,7 +46,7 @@ DEFAULT_CONFIG = {
         # null = use the last timestamp in each file (no artificial cutoff).
         "analysis_end": None,
         # Used only when mode is "fixed" or "fixed_date": number of trailing samples to keep.
-        "fixed_tail_points": 17520,
+        "fixed_tail_points": 35040,
         # When True, liquidity.py writes *_logreturns_cut.* siblings used by the active pipeline.
         "create_cut_files": True,
         "create_backup_before_cut": True,
@@ -88,19 +88,38 @@ def load_config(config_path=None):
     return cfg
 
 
+def project_root():
+    """Directory containing this module (repository root for DCh)."""
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+def resolve_path(path, base=None):
+    """
+    Return an absolute normalized path.
+
+    Relative *path* values from ``config.yaml`` are resolved against *base*
+    (default: :func:`project_root`), not the process cwd.
+    """
+    normalized = os.path.normpath(path)
+    if os.path.isabs(normalized):
+        return os.path.abspath(normalized)
+    anchor = base if base is not None else project_root()
+    return os.path.abspath(os.path.join(anchor, normalized))
+
+
 def get_data_dir(config=None):
-    """Absolute normalized path to the data directory (OHLC, log-returns, temp trims)."""
+    """Absolute path to the data directory (OHLC, log-returns, temp trims)."""
     cfg = config or load_config()
     data_dir = cfg.get("paths", {}).get("data_dir", DEFAULT_CONFIG["paths"]["data_dir"])
-    return os.path.normpath(data_dir)
+    return resolve_path(data_dir)
 
 
 def get_results_dir(config=None):
-    """Absolute normalized path to the results root (plots, summaries, hypothesis output)."""
+    """Absolute path to the results root (plots, summaries, hypothesis output)."""
     cfg = config or load_config()
     default_results = DEFAULT_CONFIG["paths"]["results_dir"]
     results_dir = cfg.get("paths", {}).get("results_dir", default_results)
-    return os.path.normpath(results_dir)
+    return resolve_path(results_dir)
 
 
 def ensure_dir(path):
@@ -121,8 +140,11 @@ def dch_test_point_count() -> int:
     """
     Number of samples used in test mode (first N rows of each series).
 
-    Override with environment variable ``DCH_TEST_POINTS`` (integer ≥ 1).
-    Batch files set ``TEST_POINT_COUNT`` from the same value via ``_dch_test_env.bat``.
+    Canonical environment variable: ``DCH_TEST_POINTS`` (integer ≥ 1; ``"100.0"`` is accepted).
+
+    Batch files include ``_dch_test_env.bat``, which sets ``DCH_TEST_POINTS`` (default 100)
+    and copies it to the local ``TEST_POINT_COUNT`` variable for ``.bat`` logic only.
+    Python code should read ``DCH_TEST_POINTS``, not ``TEST_POINT_COUNT``.
     """
     raw = os.environ.get("DCH_TEST_POINTS", "").strip()
     if raw:
@@ -377,16 +399,22 @@ MUTUAL_SUMMARY_FILENAME = "_mi_summary.txt"
 # Must match ``SERIES_COL_W`` in ``mutual.py`` (fixed-width summary rows).
 MUTUAL_SUMMARY_SERIES_COL_W = 46
 
-# Legacy static defaults when ``mutual/_mi_summary.txt`` is missing or has no minimum.
+# Last-resort τ when neither ``mutual/_mi_summary.txt`` nor ``_per_coin_settings.bat`` has a value.
+# Prefer :func:`tau_for_symbol_from_bat`; keep this aligned with the bat file after manual edits.
 TAU_FALLBACK_BY_SYMBOL = {
-    "BTCUSD": 3,
+    "BTCUSD": 5,
     "ETHUSD": 3,
-    "LTCUSD": 2,
-    "XRPUSD": 3,
-    "LINKUSD": 4,
-    "DOGEUSD": 6,
-    "ADAUSD": 4,
+    "LTCUSD": 3,
+    "XRPUSD": 2,
+    "LINKUSD": 2,
+    "DOGEUSD": 3,
+    "ADAUSD": 2,
 }
+
+# Coins that participate in the active Bitstamp pipeline (must match *.bat FILE lists).
+PIPELINE_SYMBOLS = (
+    "BTCUSD", "ETHUSD", "LTCUSD", "XRPUSD", "LINKUSD", "DOGEUSD", "ADAUSD",
+)
 
 
 def mutual_summary_path(config=None):
@@ -432,18 +460,117 @@ def parse_mutual_first_min_tau_map(config=None) -> dict[str, int]:
     return out
 
 
+def _normalize_symbol(symbol: str) -> str:
+    return str(symbol).upper().replace("/", "")
+
+
+def tau_for_symbol_from_bat(symbol: str, prefix: str = "TAU_D2_") -> int | None:
+    """Read τ from ``_per_coin_settings.bat`` (``TAU_D2_*``, ``TAU_LLE_*``, or ``TAU_RQA_*``)."""
+    sym = _normalize_symbol(symbol)
+    sk = parse_per_coin_settings_bat()
+    raw = sk.get(f"{prefix}{sym}")
+    if raw is None:
+        return None
+    try:
+        return max(1, int(float(raw)))
+    except (TypeError, ValueError):
+        return None
+
+
 def tau_for_symbol_from_mutual(symbol: str, config=None) -> int:
     """
     Embedding delay τ for *symbol*.
 
-    Prefer first MI minimum from ``mutual.py`` summary; otherwise
-    :data:`TAU_FALLBACK_BY_SYMBOL`, else 3.
+    Resolution order:
+
+    1. First MI minimum from ``mutual/_mi_summary.txt`` (authoritative after ``mutual.py``).
+    2. ``TAU_D2_<sym>`` in ``_per_coin_settings.bat`` (matches TISEAN/hypothesis batches).
+    3. :data:`TAU_FALLBACK_BY_SYMBOL`, else 3.
     """
-    sym = str(symbol).upper().replace("/", "")
+    sym = _normalize_symbol(symbol)
     m = parse_mutual_first_min_tau_map(config)
     if sym in m:
         return m[sym]
+    bat_tau = tau_for_symbol_from_bat(sym, "TAU_D2_")
+    if bat_tau is not None:
+        return bat_tau
     return int(TAU_FALLBACK_BY_SYMBOL.get(sym, 3))
+
+
+def audit_invariant_parameters(
+    config=None,
+    *,
+    symbols: tuple[str, ...] | None = None,
+) -> list[str]:
+    """
+    Check cross-module consistency of τ, W, embedding *m*, and bat/Python agreement.
+
+    Returns a list of human-readable issue strings (empty when all checks pass).
+    Intentional differences (2dc min–max scaling, cao *m*-sweep) are not flagged.
+    """
+    from hypothesis_config import M_D2, M_LYAP, RQA_EMBEDDING_DIM
+
+    issues: list[str] = []
+    syms = symbols or PIPELINE_SYMBOLS
+    bat = parse_per_coin_settings_bat()
+    if not bat:
+        issues.append("MISSING: _per_coin_settings.bat not found or empty")
+        return issues
+
+    sk = {k.upper(): v for k, v in bat.items()}
+
+    if M_D2 != M_LYAP or M_D2 != RQA_EMBEDDING_DIM:
+        issues.append(
+            f"MISMATCH: embedding m constants differ "
+            f"(M_D2={M_D2}, M_LYAP={M_LYAP}, RQA_EMBEDDING_DIM={RQA_EMBEDDING_DIM})"
+        )
+
+    mi_taus = parse_mutual_first_min_tau_map(config)
+
+    for sym in syms:
+        tau_d2 = sk.get(f"TAU_D2_{sym}")
+        tau_lle = sk.get(f"TAU_LLE_{sym}")
+        tau_rqa = sk.get(f"TAU_RQA_{sym}")
+        w_d2 = sk.get(f"W_D2_{sym}")
+
+        for label, val in (("TAU_D2", tau_d2), ("TAU_LLE", tau_lle), ("TAU_RQA", tau_rqa), ("W_D2", w_d2)):
+            if val is None:
+                issues.append(f"MISSING: {label}_{sym} in _per_coin_settings.bat")
+                continue
+
+        try:
+            t2, tl, tr, w = (
+                int(float(tau_d2)),
+                int(float(tau_lle)),
+                int(float(tau_rqa)),
+                int(float(w_d2)),
+            )
+        except (TypeError, ValueError):
+            issues.append(f"MISMATCH: non-numeric tau/W for {sym}")
+            continue
+
+        if not (t2 == tl == tr):
+            issues.append(
+                f"MISMATCH: {sym} tau families differ "
+                f"(TAU_D2={t2}, TAU_LLE={tl}, TAU_RQA={tr})"
+            )
+        if w != t2:
+            issues.append(
+                f"MISMATCH: {sym} W_D2={w} != TAU_D2={t2} (project rule: W := tau)"
+            )
+        if sym in mi_taus and mi_taus[sym] != t2:
+            issues.append(
+                f"MISMATCH: {sym} mutual/_mi_summary tau={mi_taus[sym]} "
+                f"!= _per_coin_settings TAU_D2={t2} (re-run mutual.py + sync)"
+            )
+        diag_tau = tau_for_symbol_from_mutual(sym, config)
+        if diag_tau != t2:
+            issues.append(
+                f"MISMATCH: {sym} tau_for_symbol_from_mutual()={diag_tau} "
+                f"!= bat TAU_D2={t2}"
+            )
+
+    return issues
 
 
 def sync_per_coin_bat_tau_from_mutual_summary(config=None, bat_path=None) -> tuple[str, int]:

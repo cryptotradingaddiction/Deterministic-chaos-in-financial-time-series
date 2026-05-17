@@ -15,8 +15,7 @@ REM
 REM   TAU_D2_<sym>, W_D2_<sym>     ->  correlation_dimension.bat (Takens/Ellner)
 REM                                    hypothesis.bat   TISEAN dimension branch
 REM
-REM   TAU_LLE_<sym>                ->  Lambda_max.bat            (largest Lyapunov)
-REM                                    (lyap_k uses Theiler default)
+REM   TAU_LLE_<sym>, W_D2_<sym>    ->  Lambda_max.bat (lyap_k -d -t uses same tau/W as d2)
 REM
 REM   TAU_RQA_<sym>, RAD_RQA_<sym> ->  RQA.bat                   (recurrence)
 REM

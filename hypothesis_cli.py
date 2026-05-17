@@ -7,9 +7,6 @@ import warnings
 
 import numpy as np
 
-warnings.filterwarnings("ignore", category=RuntimeWarning)
-warnings.filterwarnings("ignore", category=UserWarning)
-
 from hypothesis_config import (
     ALL_METRICS,
     BOOTSTRAP_TEST_METRICS,
@@ -48,6 +45,16 @@ def _bootstrap_samples_default():
     return DEFAULT_BOOTSTRAP_SAMPLES
 
 
+def _stationary_block_mean_default():
+    raw = os.environ.get("DCH_STATIONARY_BLOCK_MEAN", "").strip()
+    if raw:
+        try:
+            return float(raw)
+        except ValueError:
+            pass
+    return DEFAULT_STATIONARY_BLOCK_MEAN
+
+
 def parse_metrics_list(raw_metrics):
     """Normalize and validate a comma-separated CLI metric list."""
     tokens = [t.strip().upper() for t in str(raw_metrics).split(",") if t.strip()]
@@ -59,10 +66,24 @@ def parse_metrics_list(raw_metrics):
     return list(dict.fromkeys(tokens))
 
 
-def metric_names_for_scope(_=None):
-    # Direct dimension-hypothesis runs default to Ellner only. Batch scripts
-    # that need LLE/RQA pass an explicit --metrics_list.
+def default_direct_run_metrics():
+    """
+    Metrics used when ``--metrics_list`` is omitted.
+
+    Direct CLI runs default to Ellner only. Batch scripts pass an explicit
+    ``--metrics_list`` for TAKENS, LLE, or RQA scopes.
+    """
     return ["ELLNER"]
+
+
+def metric_names_for_scope(scope=None):
+    """
+    Backward-compatible alias for :func:`default_direct_run_metrics`.
+
+    The legacy ``--metrics`` flag is ignored; use ``--metrics_list`` instead.
+    """
+    del scope
+    return default_direct_run_metrics()
 
 
 # ---------------------------------------------------------------------------
@@ -96,8 +117,8 @@ def main():
     parser.add_argument(
         "--stationary_block_mean",
         type=float,
-        default=DEFAULT_STATIONARY_BLOCK_MEAN,
-        help="Mean stationary-bootstrap block length. <=0 uses sqrt(n).",
+        default=_stationary_block_mean_default(),
+        help="Mean stationary-bootstrap block length. <=0 uses sqrt(n). Env: DCH_STATIONARY_BLOCK_MEAN.",
     )
     parser.add_argument("--ts_threshold", type=float, default=DEFAULT_TS_THRESHOLD)
     parser.add_argument("--rqa_radius", type=float, default=DEFAULT_RQA_RADIUS)
@@ -161,11 +182,11 @@ def main():
 
     # Resolve the metric scope after CLI validation. When a batch file passes an
     # explicit list, that list is authoritative; otherwise use the direct-run
-    # default from metric_names_for_scope().
+    # default from default_direct_run_metrics().
     metric_names = (
         parse_metrics_list(args.metrics_list)
         if args.metrics_list.strip()
-        else metric_names_for_scope(args.metrics)
+        else default_direct_run_metrics()
     )
 
     # Active bootstrap / reference scope. With --rqa_bootstrap=off, drop the RQA
@@ -323,27 +344,34 @@ def main():
             mean_block_length=mean_block_length,
             seed=args.seed,
         )
-        for idx, boot_data in enumerate(boot_series, start=1):
-            print(
-                f"     bootstrap {idx:03d}/{args.bootstrap_samples}: "
-                f"computing {','.join(bootstrap_metrics)} ..."
-            )
-            inv_part, _inv_std_part, _inv_n_part = compute_invariants(
-                boot_data,
-                tmp_dir,
-                f"{args.base}_statboot_{idx:03d}",
-                args.delay,
-                args.theiler,
-                bootstrap_metrics,
-                locked_rqa_radius,
-                series_std_fallback=sigma_r,
-                rqa_radius_mode=locked_rqa_mode,
-                rqa_percentile=args.rqa_percentile,
-            )
-            for metric in bootstrap_metrics:
-                value = inv_part.get(metric, np.nan)
-                if np.isfinite(value):
-                    bootstrap_values[metric].append(float(value))
+        show_warnings = os.environ.get("DCH_HYPOTHESIS_WARNINGS", "").strip().lower() in (
+            "1", "true", "yes", "on"
+        )
+        with warnings.catch_warnings():
+            if not show_warnings:
+                # Narrow filter: bootstrap repeats many short-series invariant runs.
+                warnings.simplefilter("ignore", category=RuntimeWarning)
+            for idx, boot_data in enumerate(boot_series, start=1):
+                print(
+                    f"     bootstrap {idx:03d}/{args.bootstrap_samples}: "
+                    f"computing {','.join(bootstrap_metrics)} ..."
+                )
+                inv_part, _inv_std_part, _inv_n_part = compute_invariants(
+                    boot_data,
+                    tmp_dir,
+                    f"{args.base}_statboot_{idx:03d}",
+                    args.delay,
+                    args.theiler,
+                    bootstrap_metrics,
+                    locked_rqa_radius,
+                    series_std_fallback=sigma_r,
+                    rqa_radius_mode=locked_rqa_mode,
+                    rqa_percentile=args.rqa_percentile,
+                )
+                for metric in bootstrap_metrics:
+                    value = inv_part.get(metric, np.nan)
+                    if np.isfinite(value):
+                        bootstrap_values[metric].append(float(value))
 
         # Convert the bootstrap cloud of invariant estimates into the robust
         # centre and spread used by the TS statistic.

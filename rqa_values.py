@@ -49,9 +49,9 @@ from config_loader import (
     prefer_liquidity_cut,
     rqa_params_for_symbol,
 )
+from hypothesis_config import RQA_EMBEDDING_DIM, RQA_RADIUS_PERCENTILE_DEFAULT
 from hypothesis import (
     RQA_RADIUS_MAX_VECTORS,
-    RQA_RADIUS_PERCENTILE_DEFAULT,
     compute_percentile_radius,
     compute_rqa_trend,
     format_rqa_radius,
@@ -63,9 +63,6 @@ from pyrqa.metric import EuclideanMetric
 from pyrqa.neighbourhood import FixedRadius
 from pyrqa.settings import Settings
 from pyrqa.time_series import TimeSeries
-
-# Same embedding dimension as hypothesis.compute_pyrqa_metrics and RQA.bat (EMBED_DIM=3).
-RQA_EMBEDDING_DIM = 3
 
 # Active threshold: percentile of embedded pairwise Euclidean distances (rqa_tran.pdf).
 # RAD_RQA_<sym> in _per_coin_settings.bat is fallback when percentile fails.

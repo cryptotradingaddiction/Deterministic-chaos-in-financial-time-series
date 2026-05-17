@@ -1,6 +1,7 @@
 @echo off
 setlocal enabledelayedexpansion
 call "%~dp0_dch_test_env.bat"
+call "%~dp0_dch_hypothesis_cli_extra.bat"
 
 REM ============================================================================
 REM LARGEST LYAPUNOV PIPELINE (Kantz, all files)
@@ -119,7 +120,7 @@ for %%F in (%FILES%) do (
         set "HYP_DIR=!RUN2_DIR!\hypothesis_lle"
         if not exist "!HYP_DIR!" mkdir "!HYP_DIR!"
         echo   [Hypothesis] LLE stationary-bootstrap TS test ^(tau=!COIN_TAU!, W=!COIN_W!^)
-        "%PYTHON_EXE%" %PYTHON_ARGS% "C:\DCh\hypothesis.py" --input "!DATA_FILE!" --base "!BASE!" --delay !COIN_TAU! --theiler !COIN_W! --output_dir "!HYP_DIR!" --test_mode "%TEST_MODE%" --metrics_list "LLE"
+        "%PYTHON_EXE%" %PYTHON_ARGS% "C:\DCh\hypothesis.py" --input "!DATA_FILE!" --base "!BASE!" --delay !COIN_TAU! --theiler !COIN_W! --output_dir "!HYP_DIR!" --test_mode "%TEST_MODE%" --metrics_list "LLE" !DCH_HYP_EXTRA!
         if errorlevel 1 exit /b 1
         "%PYTHON_EXE%" %PYTHON_ARGS% "%PRINT_RESULTS%" boot "!HYP_DIR!\!BASE!_surrogate_summary.txt"
     ) else (

@@ -253,7 +253,7 @@ if __name__ == "__main__":
         pass
 
     # Global settings valid for all files
-    d_max = 20                    # We examine dimensions m from 1 to 30
+    d_max = 20                    # embedding dimensions m = 1 .. d_max (Cao selection diagnostic)
     num_processes = None           # Let Python use all CPU cores
     
     # Main loop: Iterates through one file after another from our settings

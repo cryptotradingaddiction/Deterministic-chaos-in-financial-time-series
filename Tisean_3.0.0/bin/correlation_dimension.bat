@@ -1,6 +1,7 @@
 @echo off
 setlocal enabledelayedexpansion
 call "%~dp0_dch_test_env.bat"
+call "%~dp0_dch_hypothesis_cli_extra.bat"
 
 REM ============================================================================
 REM CORRELATION DIMENSION PIPELINE (Takens/Ellner, all files)
@@ -119,7 +120,7 @@ for %%F in (%FILES%) do (
         set "HYP_DIR=!RUN2_DIR!\hypothesis_d2"
         if not exist "!HYP_DIR!" mkdir "!HYP_DIR!"
         echo   [Hypothesis] dimension surrogate test ^(metrics=%DIMENSION_METRICS%, tau=!COIN_TAU!, W=!COIN_W!^)
-        "%PYTHON_EXE%" %PYTHON_ARGS% "C:\DCh\hypothesis.py" --input "!DATA_FILE!" --base "!BASE!" --delay !COIN_TAU! --theiler !COIN_W! --output_dir "!HYP_DIR!" --test_mode "%TEST_MODE%" --metrics_list "%DIMENSION_METRICS%"
+        "%PYTHON_EXE%" %PYTHON_ARGS% "C:\DCh\hypothesis.py" --input "!DATA_FILE!" --base "!BASE!" --delay !COIN_TAU! --theiler !COIN_W! --output_dir "!HYP_DIR!" --test_mode "%TEST_MODE%" --metrics_list "%DIMENSION_METRICS%" !DCH_HYP_EXTRA!
         if errorlevel 1 exit /b 1
         "%PYTHON_EXE%" %PYTHON_ARGS% "%PRINT_RESULTS%" boot "!HYP_DIR!\!BASE!_surrogate_summary.txt"
     ) else (

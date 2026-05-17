@@ -51,6 +51,39 @@ This project combines:
 &nbsp;
 ---
 
+## Theoretical Foundations
+
+### Deterministic Chaos
+
+Deterministic chaos refers to complex, aperiodic behavior arising from deterministic nonlinear dynamical systems. A system is considered chaotic if it exhibits three key properties [1, 2]:
+
+1. **Sensitive Dependence on Initial Conditions (SDIC)**: Arbitrarily small differences in initial states grow exponentially over time
+2. **Topological Mixing**: The system evolves such that any given region of phase space eventually overlaps with any other region
+3. **Dense Periodic Orbits**: Periodic orbits are densely distributed in the phase space
+
+The canonical mathematical example is the logistic map:
+
+$$x_{n+1} = r \cdot x_n (1 - x_n)$$
+
+For certain values of the parameter $r$ (specifically $r > 3.57$), this simple deterministic equation produces chaotic dynamics indistinguishable from random noise by conventional statistical methods [3].
+
+### Lyapunov Exponents
+
+The Lyapunov exponent quantifies the rate at which nearby trajectories in phase space diverge or converge. For a one-dimensional map $x_{n+1} = f(x_n)$, the Lyapunov exponent is defined as [4, 5]:
+
+$$\lambda = \lim_{n \to \infty} \frac{1}{n} \sum_{i=0}^{n-1} \ln |f'(x_i)|$$
+
+For continuous-time systems, if the initial separation between two trajectories is $\delta_0$, the separation at time $t$ evolves as:
+
+$$|\delta(t)| \approx e^{\lambda t} |\delta_0|$$
+
+**Interpretation**:
+- $\lambda > 0$: Chaotic behavior—nearby trajectories diverge exponentially
+- $\lambda = 0$: Marginal stability—characteristic of bifurcation points
+- $\lambda < 0$: Stable fixed point or periodic orbit—trajectories converge
+
+&nbsp;
+
 ## Mathematical Formulations
 
 ### Phase Space Reconstruction (Takens' Embedding)

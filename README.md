@@ -11,6 +11,9 @@ This project combines:
 - stationary-bootstrap/reference testing with point-wise reshuffle, Gaussian and Student-t reference series, and a `TS` decision rule for dimension metrics (`ELLNER` by default, optionally `TAKENS` or `TAKENS,ELLNER`), **LLE**, and (by default) **RQA** scalars.
 
 ---
+&nbsp;
+&nbsp;
+&nbsp;
 
 ## Table of Contents
 
@@ -181,6 +184,9 @@ Note: **LLE** at N≈100 often returns `insufficient data` with production `tau`
 
 The pipelines under `Tisean_3.0.0\bin\*.bat` are **Windows Command Prompt** scripts (`cmd.exe`). They are **not** PowerShell (`.ps1`). Below is the syntax you will actually see, in plain language.
 
+&nbsp;
+&nbsp;
+&nbsp;
 
 ### What runs the script
 
@@ -195,6 +201,9 @@ hypothesis.bat
 
 `cd /d` changes drive **and** directory (needed when `C:` vs `D:` differs from your current drive).
 
+&nbsp;
+&nbsp;
+&nbsp;
 
 ### Lines that appear at the top of almost every script
 
@@ -205,6 +214,9 @@ hypothesis.bat
 | `setlocal enabledelayedexpansion` | Allows `!VAR!` syntax (see below). Used wherever the loop variable `BASE` changes and is read again in the same block. |
 | `REM ...` | Comment (ignored). |
 
+&nbsp;
+&nbsp;
+&nbsp;
 
 ### Setting and reading variables
 
@@ -217,6 +229,9 @@ hypothesis.bat
 
 **Delayed expansion `!VAR!`:** evaluated **when each line runs**, inside `( )` blocks and loops — required when a variable is **set and then read** in the same `for` loop. All invariant pipelines use this for `!BASE!`, `!DATA_FILE!`, etc.
 
+&nbsp;
+&nbsp;
+&nbsp;
 
 ### Special parameters (`%0`, `%1`, `%~dp0`)
 
@@ -226,6 +241,9 @@ hypothesis.bat
 | `%~dp0` | **D**rive + **p**ath of the folder containing the script (trailing `\`). Used so `call "%~dp0_per_coin_settings.bat"` always finds the helper next to the caller, no matter your current directory. |
 | `%~1` | First argument to a subroutine, with quotes stripped; `%~2` second, etc. Used in `:RUN_D2`, `:RUN_LLE`, `:RUN_RQA`. |
 
+&nbsp;
+&nbsp;
+&nbsp;
 
 ### Calling another batch vs “including” it
 
@@ -233,6 +251,9 @@ hypothesis.bat
 
 - **`call :LABEL arg1 arg2`** jumps to a **subroutine** `:LABEL` inside the same file; **`exit /b`** returns from it (without closing the whole window).
 
+&nbsp;
+&nbsp;
+&nbsp;
 
 ### Success and failure
 
@@ -240,6 +261,9 @@ hypothesis.bat
 
 - **`exit /b 1`** stops this batch with error code `1` (parent `hypothesis.bat` can detect failure).
 
+&nbsp;
+&nbsp;
+&nbsp;
 
 ### Quotes, spaces, and special characters in `echo`
 
@@ -249,11 +273,17 @@ hypothesis.bat
 
 - **`()`** in `echo` lines are often wrapped with `^(` `^)` so `cmd` does not treat them as **block** syntax.
 
+&nbsp;
+&nbsp;
+&nbsp;
 
 ### Line continuation (outside `.bat` examples)
 
 In README examples, **`^` at end of line** continues a **single** command on the next line (standard `cmd` continuation). The **`^` must be the last character** on the line (no trailing spaces).
 
+&nbsp;
+&nbsp;
+&nbsp;
 
 ### `for` loops: why `%%F` not `%F`
 
@@ -267,6 +297,9 @@ for %%F in (%FILES%) do (
 
 `%FILES` expands to the whole list of filenames **once**; `%%F` is each file in turn.
 
+&nbsp;
+&nbsp;
+&nbsp;
 
 ### Nested `for /f`: extracting the coin symbol
 
@@ -276,6 +309,9 @@ for /f "tokens=1 delims=_" %%A in ("%%F") do set BASE=%%A
 
 Splits `BTCUSD_BITSTAMP_...` on `_` and takes the **first** token → `BASE=BTCUSD`.
 
+&nbsp;
+&nbsp;
+&nbsp;
 
 ### Dynamic variable names: `call set`
 
@@ -285,8 +321,15 @@ Per-coin settings are variables like `TAU_LLE_BTCUSD`. The script builds the nam
 call set "COIN_TAU=%%TAU_LLE_!BASE!%%"
 ```
 
+&nbsp;
+&nbsp;
+&nbsp;
+
 **How to read it:** the inner `%% ... %%` is resolved in a second step so the **name** becomes `TAU_LLE_BTCUSD` and its **value** is assigned to `COIN_TAU`. Without this trick, `%TAU_LLE_%BASE%` would not work as intended.
 
+&nbsp;
+&nbsp;
+&nbsp;
 
 ### Redirects and quick I/O
 
@@ -297,6 +340,9 @@ call set "COIN_TAU=%%TAU_LLE_!BASE!%%"
 | `>nul` | Discard output. |
 | `2>&1` | Send stderr to same place as stdout (often seen with gnuplot). |
 
+&nbsp;
+&nbsp;
+&nbsp;
 
 ### Chained commands
 
@@ -308,6 +354,9 @@ call set "COIN_TAU=%%TAU_LLE_!BASE!%%"
 
 <a id="recurr-batch-percent-flag"></a>
 
+&nbsp;
+&nbsp;
+&nbsp;
 
 ### Why `recurr` uses `-%%2` in the `.bat` file
 
@@ -319,6 +368,12 @@ In a batch file, **`%%` prints one literal `%` character** (and does **not** exp
 Some steps call **`powershell -NoProfile -Command "..."`** to trim the first **`DCH_TEST_POINTS`** lines (default **100**) in test mode. Quotes inside that string use **`!FULL_DATA!`** (delayed expansion) so paths survive the nested quoting. All TISEAN `.bat` files include **`_dch_test_env.bat`** for shared test defaults.
 
 ---
+&nbsp;
+&nbsp;
+&nbsp;
+&nbsp;
+&nbsp;
+&nbsp;
 
 ## End-to-End Workflow
 
@@ -337,6 +392,10 @@ contiguity, then exports the complete contiguous Bitstamp range for each coin.
 The final analysis window is not chosen here; it is selected later by
 `liquidity.py` after log-returns have been computed.
 
+&nbsp;
+&nbsp;
+&nbsp;
+
 ### Step 2 - Compute logreturns
 
 ```bat
@@ -348,6 +407,10 @@ Output examples:
 - `BTCUSD_BITSTAMP_1h_complete_logreturns.dat`
 - `BTCUSD_BITSTAMP_1h_complete_logreturns.csv`
 
+&nbsp;
+&nbsp;
+&nbsp;
+
 ### Step 3 - Liquidity cut (active analysis window)
 
 ```bat
@@ -355,6 +418,10 @@ py -3 C:\DCh\liquidity.py
 ```
 
 Produces `*_logreturns_cut.dat` / `.csv` used by later diagnostics and TISEAN steps.
+
+&nbsp;
+&nbsp;
+&nbsp;
 
 ### Step 4 - Embedding diagnostics (recommended before TISEAN)
 
@@ -370,6 +437,10 @@ py -3 C:\DCh\2dc.py
 ```
 
 `theilers_w.bat` runs `corr.exe` + `stp.exe` for diagnostic ACF/STP PNGs, sets **`W_final := TAU_D2_<sym>`** (rule **W = τ**), and syncs **`W_D2_<sym>`** in `_per_coin_settings.bat`.
+
+&nbsp;
+&nbsp;
+&nbsp;
 
 ### Step 5 - Run distributed nonlinear pipeline
 
@@ -400,7 +471,12 @@ $env:DCH_RUN_HYPOTHESIS = "false"
 ```
 
 ---
-
+&nbsp;
+&nbsp;
+&nbsp;
+&nbsp;
+&nbsp;
+&nbsp;
 ## Distributed Hypothesis Workflow
 
 ### Why distributed
@@ -411,6 +487,10 @@ Each invariant family has different output files, parameterization, and practica
 - output locality (summaries close to the generated invariant files),
 - simpler debugging when one stage fails.
 
+&nbsp;
+&nbsp;
+&nbsp;
+
 ### What each script calls
 
 - `correlation_dimension.bat` -> `hypothesis.py --metrics_list %DCH_DIMENSION_METRICS%` (default `ELLNER`; can be `TAKENS` or `TAKENS,ELLNER`)
@@ -419,11 +499,18 @@ Each invariant family has different output files, parameterization, and practica
 
 All three active invariant scripts respect `DCH_RUN_HYPOTHESIS`. With `DCH_RUN_HYPOTHESIS=false`, these `hypothesis.py` calls and the final `print_results.py boot_aggregate` step are skipped; the main TISEAN/PyRQA outputs are still produced.
 
+&nbsp;
+&nbsp;
+&nbsp;
+
 ### Wrapper behavior
 
 `hypothesis.bat` no longer contains monolithic fixed-parameter hypothesis logic; it orchestrates the three active scripts above in sequence, then runs **`documents.py`** to refresh **`results.docx`** under **`paths.results_dir`** from `config.yaml` and opens it with the default Windows handler (if the file exists). `correlation_entropy.bat` was removed from the active pipeline.
 
 ---
+&nbsp;
+&nbsp;
+&nbsp;
 
 ## Statistical Model (Current, Supervisor-Aligned)
 
@@ -436,6 +523,10 @@ For each original log-return series, `hypothesis.py` constructs:
 3. `t3.5`: one Student-t reference series with `df=3.5`, scaled to the original mean and SD.
 
 The permutation keeps the marginal mean/SD identical to the original series but destroys temporal order. The Gaussian and Student-t references are reported as descriptive benchmarks, not as the main test pair.
+
+&nbsp;
+&nbsp;
+&nbsp;
 
 ### Invariant sources and test
 
@@ -466,6 +557,10 @@ Use `--rqa_bootstrap off` for legacy original-only RQA (no TS column). `--seed` 
 
 ---
 
+&nbsp;
+&nbsp;
+&nbsp;
+
 ## Outputs and Folder Structure
 
 ### Root result folders
@@ -476,7 +571,9 @@ Typical folders under `C:\DCh\data\results`:
 - `lambda_max_test_100` / `lambda_max_full`
 - `rqa_test_100` / `rqa_full`
 - `theiler_w_test_100` / `theiler_w` — per-coin ACF/STP plots and `_theiler_summary.txt`
-
+&nbsp;
+&nbsp;
+&nbsp;
 ### Per-coin run folder pattern
 
 Examples:
@@ -500,6 +597,10 @@ Summary file naming:
 No active `_bootstrap_summary.txt` naming should be used.
 
 ---
+
+&nbsp;
+&nbsp;
+&nbsp;
 
 ## How to Read Surrogate Results
 
@@ -526,6 +627,10 @@ When `print_results.py boot_aggregate` builds the compact table, column **`rej_a
 
 ---
 
+&nbsp;
+&nbsp;
+&nbsp;
+
 ## Per-Coin Configuration
 
 Single source of truth:
@@ -546,6 +651,10 @@ Operational notes:
 - desktop GUI forwards test mode, hypothesis toggle, dimension metrics, and bootstrap **B** via environment variables.
 
 ---
+
+&nbsp;
+&nbsp;
+&nbsp;
 
 ## Repository Map
 
@@ -585,6 +694,9 @@ Operational notes:
 - `desktop_app.py`, `build_desktop_app.bat`, `DChPipelineApp.spec`
 
 ---
+&nbsp;
+&nbsp;
+&nbsp;
 
 ## Diagnostics: Mutual Information (`mutual.py`)
 
@@ -592,9 +704,17 @@ Standalone Python diagnostic for choosing embedding delay **tau**. It does **not
 
 The implementation is meant to follow the paper **equation-by-equation**; the longest rationale lives in **`mutual.py`** (module docstring + comments on Eqs 19–22, 20a/b, and the χ² thresholds).
 
+&nbsp;
+&nbsp;
+&nbsp;
+
 ### Primary reference (paper)
 
 Fraser, A. M., & Swinney, H. L. (1986). Independent coordinates for strange attractors from mutual information. *Physical Review A*, *33*(2), 1134–1140. [https://doi.org/10.1103/PhysRevA.33.1134](https://doi.org/10.1103/PhysRevA.33.1134)
+
+&nbsp;
+&nbsp;
+&nbsp;
 
 ### Paper ↔ code correspondence (Fraser & Swinney)
 
@@ -606,6 +726,10 @@ Fraser, A. M., & Swinney, H. L. (1986). Independent coordinates for strange attr
 | Eq. **(20b)** — subdivide | `N log 4 + Σ F_quadrants`; code cites link to **(14)** / **(16b)** for the `N log 4` term. |
 | Eq. **(21)** — 4-cell uniformity test | Reduced χ² with prefactor `(16/5)/N`, threshold **1.547** (20% level, 3 df). |
 | Eq. **(22)** — 16-cell test | Prefactor `(256/225)/N`, threshold **1.287** (20% level, 15 df), only if both rank spans ≥ 4. |
+
+&nbsp;
+&nbsp;
+&nbsp;
 
 ### Algorithm (Fraser & Swinney, 1986)
 
@@ -623,11 +747,19 @@ Fraser, A. M., & Swinney, H. L. (1986). Independent coordinates for strange attr
 
 5. **Suggested τ.** `find_first_minimum` scans for the **first local minimum** of `I(tau)` (strictly lower than both neighbours along the discrete τ grid). This follows the usual “first minimum of MI” rule cited by Fraser & Swinney / Shaw.
 
+&nbsp;
+&nbsp;
+&nbsp;
+
 ### Constants and implementation notes
 
 - `DEFAULT_MAX_TAU = 100` unless you change it at the top of `mutual.py`.
 - Recursion depth safety: `sys.setrecursionlimit(200000)` at import (deep partitions on long series).
 - Aggregated summary header columns: `series_id`, `N`, `max_tau`, `first_min_tau`, `I(first_min)`, `I(tau=1)` (`SUMMARY_HEADER` in source).
+
+&nbsp;
+&nbsp;
+&nbsp;
 
 ### Outputs (per file)
 
@@ -639,10 +771,18 @@ Written under `paths.results_dir/mutual/`:
 | `<stem>_mi_results.txt` | Full console-style report from `Reporter` |
 | `_mi_summary.txt` | One appended row per processed series (reset at each script run) |
 
+&nbsp;
+&nbsp;
+&nbsp;
+
 ### Inputs and data selection
 
 - Hard-coded list of seven `*_BITSTAMP_1h_complete_logreturns.dat` names (edit in `if __name__ == "__main__"` block).
 - **Data length**: `crypto_data_all.py` exports the full contiguous Bitstamp range (end date from `download.to` or “today”, never a hardcoded calendar cap). `compute_logreturns.py` computes log-returns for that full range, and `liquidity.py` writes the active `*_logreturns_cut.*` files. Windowing is controlled by `config.yaml` → `liquidity`: either the rolling zero-return **liquidity** rule (optional `analysis_end`; `null` means through the last sample) or **fixed** mode, which keeps the last **`fixed_tail_points`** rows (same trailing length for every series). Legacy YAML value **`fixed_date`** is accepted as an alias for **fixed**. `prefer_liquidity_cut` redirects callers to those cut files and fails if they are missing.
+
+&nbsp;
+&nbsp;
+&nbsp;
 
 ### How to run
 
@@ -652,11 +792,19 @@ py -3 C:\DCh\mutual.py
 
 No argparse; all paths from `config.yaml`. To extend symbols or τ range, edit the `files` list and/or `DEFAULT_MAX_TAU`.
 
+&nbsp;
+&nbsp;
+&nbsp;
+
 ### Relation to the main pipeline
 
 Chosen τ from the **first local minimum** of Fraser–Swinney mutual information is written to ``mutual/_mi_summary.txt``. Python tools (**`2dc.py`**, **`phase_2D.py`**, **`phase_3D.py`**, **`cao_.py`**) read that file via ``config_loader.tau_for_symbol_from_mutual`` (with legacy fallbacks if the summary is missing). At the end of each **`mutual.py``** run, **`sync_per_coin_bat_tau_from_mutual_summary`** updates ``TAU_D2_*``, ``TAU_LLE_*``, and ``TAU_RQA_*`` in ``_per_coin_settings.bat`` so TISEAN batches and ``hypothesis.py`` use the same delays.
 
 ---
+
+&nbsp;
+&nbsp;
+&nbsp;
 
 ## Diagnostics: Cao Embedding Dimension (`cao_.py`)
 
@@ -664,9 +812,17 @@ Standalone Python implementation of **Cao (1997)**. It does **not** call TISEAN.
 
 Step-by-step labels (`STEP 1` … `STEP 4`, Takens → NN → `(m+1)` distance → `a_i`) match the comments in **`cao_.py`** (`calculate_for_m`), including Chebyshev norm and `a_i` as distance ratio.
 
+&nbsp;
+&nbsp;
+&nbsp;
+
 ### Primary reference (paper)
 
 Cao, L. (1997). Practical method for determining the minimum embedding dimension of a scalar time series. *Physica D*, *110*(1–2), 43–50. [https://doi.org/10.1016/S0167-2789(97)00118-8](https://doi.org/10.1016/S0167-2789(97)00118-8)
+
+&nbsp;
+&nbsp;
+&nbsp;
 
 ### Paper ↔ code correspondence (Cao)
 
@@ -678,17 +834,29 @@ Cao, L. (1997). Practical method for determining the minimum embedding dimension
 | **E(m)**, **E\*(m)** | Means of `a_i` and of `\|Δ new coord.\|` respectively. |
 | **E1(m) = E(m+1)/E(m)**, **E2(m) = E\*(m+1)/E\*(m)** | Built after parallel passes over `m = 1 … d_max+1`. |
 
+&nbsp;
+&nbsp;
+&nbsp;
+
 ### Geometry and notation
 
 - Scalar series `data` length `N`. Takens embedding with integer delay `τ` and dimension `m`:
   - Valid points: `N_valid = N - m·τ`.
   - Row `i` of `X_m`: `[data[i], data[i+τ], …, data[i+(m-1)τ]]`.
 
+&nbsp;
+&nbsp;
+&nbsp;
+
 ### Nearest neighbours
 
 - Metric: **Chebyshev** (`L∞`): `NearestNeighbors(..., metric='chebyshev', algorithm='kd_tree', n_neighbors=2)`.
 - Index `1` is the **true** NN (index `0` is the query point itself).
 - If distance `0`, `find_nonzero_neighbor` increases `k` until a positive-distance neighbour is found (avoids division by zero in ratios).
+
+&nbsp;
+&nbsp;
+&nbsp;
 
 ### Cao statistics (per `m`)
 
@@ -704,15 +872,27 @@ From arrays `E(m)` and `E*(m)` for `m = 1 .. d_max+1`:
 
 Returned arrays to plotting are `E1[1:], E2[1:]` indexed by `m = 1..d_max`.
 
+&nbsp;
+&nbsp;
+&nbsp;
+
 ### Parallelism
 
 - `multiprocessing.Pool`; default `num_processes = mp.cpu_count()`.
 - Inside workers, `NearestNeighbors` uses `n_jobs=1` to avoid nested parallelism warnings.
 
+&nbsp;
+&nbsp;
+&nbsp;
+
 ### Parameters (defaults)
 
 - `d_max = 20` → dimensions `m = 1 .. 20` on plots (internally needs `m+1` for ratios).
 - Per-symbol `(file, tau)` in `file_settings` (BTC/ETH τ=2, LTC/LINK τ=4, XRP/DOGE τ=3, ADA τ=2 in the checked-in list).
+
+&nbsp;
+&nbsp;
+&nbsp;
 
 ### Outputs
 
@@ -724,6 +904,10 @@ Under `paths.results_dir/cao/`:
 | `<filename_stem>_tau{tau}_cao_results.txt` | Tabular E1/E2 and heuristic “optimal m” / verdict text |
 | `_cao_summary.txt` | Aggregated rows (`SUMMARY_HEADER` in source); cleared each run |
 
+&nbsp;
+&nbsp;
+&nbsp;
+
 ### How to run
 
 ```bat
@@ -734,9 +918,17 @@ Customize `file_settings`, `d_max`, or `num_processes` in the `__main__` section
 
 ---
 
+&nbsp;
+&nbsp;
+&nbsp;
+
 ## Diagnostics: Capacity Dimension (`2dc.py`)
 
 **Pure NumPy / SciPy** capacity dimension estimate on Takens sets — **no** `boxcount.exe`.
+
+&nbsp;
+&nbsp;
+&nbsp;
 
 ### Takens construction
 
@@ -745,12 +937,20 @@ For embedding dimension `m` and delay `τ`:
 - Number of vectors `L = len(x) - (m-1)·τ`.
 - Row `i`: `[x[i], x[i+τ], …, x[i+(m-1)τ]]`.
 
+&nbsp;
+&nbsp;
+&nbsp;
+
 ### Normalization and boxes
 
 - Each coordinate column min–max scaled to `[0, 1]` (epsilon `1e-12` in denominator against degenerate columns).
 - For each box scale `r` in `logspace(log10(0.02), log10(0.5), 40)`:
   - `n_bins = ceil(1/r)`; grid indices `floor(Y/r)` clipped to `[0, n_bins-1]` per axis.
   - `M(r) =` number of **distinct** index tuples (unique rows) — occupancy count.
+
+&nbsp;
+&nbsp;
+&nbsp;
 
 ### Scaling fit
 
@@ -759,17 +959,29 @@ For embedding dimension `m` and delay `τ`:
 - `select_best_scaling_window` scans **all contiguous windows** with at least `MIN_WINDOW_POINTS = 8` points; score `R² + 0.05·(window_length / n)` picks the trade-off between linearity and interval length.
 - Slope = estimate of capacity dimension `d_c` for that `m`. Uncertainty: `ci95 = 1.96 * stderr` from `scipy.stats.linregress` on the chosen window.
 
+&nbsp;
+&nbsp;
+&nbsp;
+
 ### Choosing best `m`
 
 - Candidates must satisfy `R² ≥ MIN_R2_FOR_TRUST` (`0.98`).
 - Among those, pick **smallest 95% CI half-width**; tie-break by larger `R²`.
 - Flags in per-m rows: `LOW_R2`, `SATURATION_HIGH` if too many discarded `r` (see source).
 
+&nbsp;
+&nbsp;
+&nbsp;
+
 ### Defaults
 
 - Input files: seven `*_complete_logreturns.csv` names at top of script.
 - `TAU_BY_SYMBOL`: BTC/ETH/ADA `2`, XRP/DOGE `3`, LTC/LINK `4`.
 - `m_values = [2, 3, 4, 5, 10]`.
+
+&nbsp;
+&nbsp;
+&nbsp;
 
 ### Outputs
 
@@ -781,17 +993,29 @@ Under `paths.results_dir/2dc/`:
 | `<stem>_2dc_tau{tau}_results.txt` | Per-m table and best-m summary |
 | `_2dc_summary.txt` | One row per asset (reset each run) |
 
+&nbsp;
+&nbsp;
+&nbsp;
+
 ### How to run
 
 ```bat
 py -3 C:\DCh\2dc.py
 ```
 
+&nbsp;
+&nbsp;
+&nbsp;
+
 ### Relation to TISEAN `boxcount`
 
 Same scaling idea (count occupied ε-boxes in embedding space); here it is **implemented directly** so you do not depend on TISEAN’s grid conventions for this diagnostic.
 
 ---
+
+&nbsp;
+&nbsp;
+&nbsp;
 
 ## TISEAN Binaries Used (Active Pipeline)
 
@@ -806,6 +1030,10 @@ Same scaling idea (count occupied ε-boxes in embedding space); here it is **imp
 | `stp.exe` | Space-time separation plot | STP PNGs + Theiler saturation bands |
 | `c2t.exe` | Takens curve from `.c2` | `<BASE>_takens.dat` (in `correlation_dimension.bat`) |
 
+&nbsp;
+&nbsp;
+&nbsp;
+
 ### Where to read the full manuals
 
 The CLI flags are the same style as in **GNU Octave’s TISEAN package** (thin wrappers around the same routines). Useful entry points:
@@ -819,6 +1047,10 @@ The CLI flags are the same style as in **GNU Octave’s TISEAN package** (thin w
 General conventions (`-l`, `-x`, `-c`, `-d`, `-m`/`-M`, `-t`, `-r`/`-R`, …) are summarized in [TISEAN general usage](https://www.pks.mpg.de/tisean/TISEAN_2.1/docs/general.html). Package overview: [TISEAN contents](https://www.pks.mpg.de/tisean/Tisean_3.0.1/docs/contents.html).
 
 ---
+
+&nbsp;
+&nbsp;
+&nbsp;
 
 ### `lyap_k` — Kantz largest Lyapunov exponent
 
@@ -864,6 +1096,10 @@ For comparison, **Rosenstein’s method** is `lyap_r` (not used in this repo); s
 
 ---
 
+&nbsp;
+&nbsp;
+&nbsp;
+
 ### `d2` — Grassberger–Procaccia correlation integral
 
 **Role:** estimates the **correlation sum** `C^(m)(r)` and derived **local slopes** for correlation dimension (`D₂`) and related files.
@@ -895,6 +1131,10 @@ Manual: [d2](https://www.pks.mpg.de/tisean/Tisean_3.0.1/docs/docs_c/d2.html).
 
 ---
 
+&nbsp;
+&nbsp;
+&nbsp;
+
 ### `recurr` — recurrence plot
 
 **Role:** lists pairs `(i, j)` whose **embedded vectors** lie within distance **`-r`** (Chebyshev/Euclidean per build; see manual).
@@ -913,6 +1153,10 @@ Manual: [d2](https://www.pks.mpg.de/tisean/Tisean_3.0.1/docs/docs_c/d2.html).
 Manual: [recurr](https://www.pks.mpg.de/tisean/Tisean_3.0.1/docs/docs_c/recurr.html).
 
 ---
+
+&nbsp;
+&nbsp;
+&nbsp;
 
 ### Exact patterns from `*.bat`
 
@@ -950,14 +1194,26 @@ recurr.exe -m1,3 -d<tau> -r<radius> -%%2 -o "<OUT>\<BASE>_recurr.txt" "<DATA.dat
 - `-m1,3` ⇒ **1** component, embedding **m = 3**.
 - `tau = TAU_RQA_<sym>`, `r = percentile radius`; `RQA.bat` computes the **4-th percentile of pairwise Euclidean distances between embedded state vectors** (`m=3`, `tau=TAU_RQA_<sym>`) before calling `recurr.exe`, then passes the same effective radius through to the RQA hypothesis output folder. `RAD_RQA_<sym>` remains a fallback only.
 
+&nbsp;
+&nbsp;
+&nbsp;
+
 ### Supporting tooling
 
 - **gnuplot** (`GNUPLOT_EXE`): optional PNG plots next to numeric outputs; pipeline continues if missing (`.bat` sets `HAS_GNUPLOT=false`).
 - **Python** (`py -3`): `print_results.py` for quick numeric summaries; `hypothesis.py` for surrogates + statistics; `rqa_values.py` for PyRQA scalars after `recurr`.
 
+&nbsp;
+&nbsp;
+&nbsp;
+
 ### Binary discovery (`hypothesis.py` helpers)
 
 `resolve_tool(name)` searches `TISEAN_BIN` env, then `C:\DCh\Tisean_3.0.0\bin\<name>.exe`, then `PATH`. Hypothesis recomputation uses this for `d2`, `lyap_k`, etc.
+
+&nbsp;
+&nbsp;
+&nbsp;
 
 ### Python TISEAN wrappers (`tisean_io.py`)
 
@@ -976,6 +1232,10 @@ Removed standalone BATs (`information_dimension.bat`, `kolmogorov_entropy.bat`, 
 **Not used in this repo** but related Lyapunov tools: [lyap_r](https://www.pks.mpg.de/tisean/Tisean_3.0.1/docs/docs_c/lyap_r.html) (Rosenstein), [lyap_spec](https://www.pks.mpg.de/tisean/Tisean_3.0.1/docs/docs_c/lyap_spec.html) (Sano–Sawada spectrum).
 
 ---
+
+&nbsp;
+&nbsp;
+&nbsp;
 
 ## Method Notes by Script
 
@@ -1021,11 +1281,19 @@ Batch runs `recurr.exe`, then `rqa_values.py`, then RQA hypothesis.
 
 **Line of identity / MAXLINE.** PyRQA's `theiler_corrector` uses `W_D2_<sym>`, which equals the embedding delay τ (`W := τ` after `theilers_w.bat`); the same integer is passed as `min_k` to `compute_rqa_trend`. `RR` is PyRQA's recurrence-rate output. `TREND` is computed from diagonal recurrence densities for `k >= max(1, W)` (pair of diagonals `+k/-k`), then a weighted linear slope of density versus `k`.
 
+&nbsp;
+&nbsp;
+&nbsp;
+
 ### `print_results.py`
 
 Parsing and aggregates for console logs and surrogate summaries.
 
 ---
+
+&nbsp;
+&nbsp;
+&nbsp;
 
 ## Desktop GUI
 
@@ -1073,6 +1341,10 @@ build_desktop_app.bat
 Expected binary: `C:\DCh\dist\DChPipelineApp.exe`
 
 ---
+
+&nbsp;
+&nbsp;
+&nbsp;
 
 ## Troubleshooting
 
@@ -1132,6 +1404,10 @@ py -3 C:\DCh\hypothesis.py ^
 
 ---
 
+&nbsp;
+&nbsp;
+&nbsp;
+
 ## Historical/Removed Components
 
 The following are not part of active execution flow:
@@ -1146,6 +1422,10 @@ The following are not part of active execution flow:
 Historical mentions may remain in methodology context, but operationally the project is run2-only distributed workflow.
 
 ---
+
+&nbsp;
+&nbsp;
+&nbsp;
 
 ## Third-party: TISEAN
 
@@ -1164,6 +1444,10 @@ Hegger, R., Kantz, H., & Schreiber, T. (1999). Practical implementation of nonli
 The official TISEAN distribution is released under the **GNU General Public License v2** (GPL-2.0). The full license text is shipped with upstream sources as the file **`COPYING`** in the root of the package you download from MPI PKS (GPLv2 text begins with “GNU GENERAL PUBLIC LICENSE Version 2, June 1991”). If you redistribute or modify TISEAN itself, comply with GPLv2; using this pipeline only as a caller of unmodified binaries is typically governed by those terms as well — when in doubt, read **`COPYING`** in your local TISEAN tree or consult the upstream maintainers.
 
 ---
+
+&nbsp;
+&nbsp;
+&nbsp;
 
 ## Citation
 

@@ -1,5 +1,10 @@
 # Deterministic Chaos in Financial Time Series
 
+![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
+![License: MIT](https://img.shields.io/badge/License-MIT-green)
+![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)
+![TISEAN](https://img.shields.io/badge/TISEAN-orchestration-orange)
+
 End-to-end research pipeline for nonlinear analysis of cryptocurrency log-return time series, with distributed surrogate-based hypothesis testing.
 
 This project combines:
@@ -20,7 +25,7 @@ This project combines:
 - [Project Scope](#project-scope)
 - [Current Architecture (Important)](#current-architecture-important)
 - [Quick Start](#quick-start)
-- [Windows CMD primer (batch files)](#windows-cmd-primer-batch-files)
+- [Windows CMD primer (batch files)](#windows-cmd-primer-batch-files) *(collapsible)*
 - [End-to-End Workflow](#end-to-end-workflow)
 - [Distributed Hypothesis Workflow](#distributed-hypothesis-workflow)
 - [Statistical Model (Current, Supervisor-Aligned)](#statistical-model-current-supervisor-aligned)
@@ -51,12 +56,49 @@ The pipeline is designed to test whether selected chaos-related invariants from 
 
 Main tested invariants:
 
-- `TAKENS` — the plateau mean of Takens' maximum-likelihood estimator `d_2^(T)(r')` (eq. 8.75-8.76) from `c2t.exe`,
-- `ELLNER` — Ellner's extension `d_2^(E)` (eq. 8.78) over `[r_min, r_max]`, where the interval is auto-detected from the same Takens plateau,
-- `LLE` (largest Lyapunov exponent proxy from `lyap_k` outputs),
-- `RQA` metrics (`RR`, `DET`, `LAM`, `MAXLINE`, `ENTR`, `TT`, `TREND`).
+- **TAKENS** — plateau mean of the Takens–Theiler estimator $d_2^{(T)}(r')$ (eqs. 8.75–8.76) from `c2t.exe`,
+- **ELLNER** — Ellner extension $d_2^{(E)}$ (eq. 8.78) on the plateau $[r_{\min}, r_{\max}]$:
 
-The hypothesis part is distributed across per-invariant batch scripts and consolidated with a wrapper entry point.
+  $$d_2^{(E)} = \frac{C^{(m)}(r_{\max}) - C^{(m)}(r_{\min})}{\displaystyle\int_{r_{\min}}^{r_{\max}} \frac{C(r)}{r}\, dr}$$
+
+- **LLE** — largest Lyapunov exponent proxy from `lyap_k` (Kantz $S(t)$ slope),
+- **RQA** — `RR`, `DET`, `LAM`, `MAXLINE`, `ENTR`, `TT`, `TREND` (PyRQA + custom trend).
+
+The hypothesis part is distributed across per-invariant batch scripts and consolidated with `hypothesis.bat`.
+
+### Pipeline overview
+
+```mermaid
+flowchart TB
+  subgraph ingest["Data ingestion"]
+    A["ccxt → OHLC CSV"]
+    B["log-returns + liquidity cut"]
+  end
+  subgraph embed["Embedding diagnostics"]
+    C["mutual.py → τ"]
+    D["tau_w / theilers_w → W := τ"]
+    E["cao_.py / 2dc / phase plots"]
+  end
+  subgraph tisean["TISEAN binaries"]
+    F["d2 + c2t → TAKENS / ELLNER"]
+    G["lyap_k → LLE"]
+    H["recurr → recurrence plot"]
+  end
+  subgraph infer["Inference"]
+    I["hypothesis.py / hypothesis_cli.py<br/>stationary bootstrap + TS"]
+    J["PyRQA → RQA scalars"]
+    K["documents.py → results.docx"]
+  end
+  A --> B --> C --> D --> E
+  B --> F
+  B --> G
+  B --> H
+  F --> I
+  G --> I
+  H --> J
+  J --> I
+  I --> K
+```
 
 ---
 &nbsp;
@@ -69,16 +111,28 @@ The hypothesis part is distributed across per-invariant batch scripts and consol
 
 - `run1` is removed from active workflow.
 - All active invariant workflows are `run2`-based and per-coin parametrized.
-- `hypothesis.bat` is now a wrapper that calls:
-  - `correlation_dimension.bat`,
-  - `Lambda_max.bat`,
-  - `RQA.bat`.
+- `hypothesis.bat` is a wrapper that calls three pipelines:
+
+```mermaid
+flowchart LR
+  H["hypothesis.bat"]
+  D2["correlation_dimension.bat"]
+  LLE["Lambda_max.bat"]
+  RQA["RQA.bat"]
+  H --> D2
+  H --> LLE
+  H --> RQA
+```
 
 ### Statistical model currently used
 
-- Null/reference series: one point-wise reshuffle (`randperm`, no blocks), one Gaussian `N(mu_r, sigma_r)` series, and one Student-t series with `df=3.5` scaled to `(mu_r, sigma_r)`.
-- **Inference:** for dimension metrics selected by `DCH_DIMENSION_METRICS` (`ELLNER` by default; valid values include `TAKENS`, `ELLNER`, `TAKENS,ELLNER`), for **LLE**, and (by default) for **RQA** scalars (`RR`, `DET`, `LAM`, `MAXLINE`, `ENTR`, `TT`, `TREND`), `hypothesis.py` / `hypothesis_cli.py` generates **B** stationary-bootstrap pseudo-series from the original (default **B=100**, overridable), computes the invariant on each one, and uses their mean and sample SD as the robust reference centre and spread.
-- Decision rule: compare that bootstrap centre with one fully reshuffled invariant via `TS=(mean_boot-reshuffle)/SD_boot`; reject `H0` if `|TS| > 3`. RQA uses the same rule when `--rqa_bootstrap on` (default); the recurrence radius is **locked from the original series** so every bootstrap and reference run shares the same `r`.
+- **Null/reference series:** one point-wise reshuffle (`randperm`), one Gaussian $\mathcal{N}(\mu_r, \sigma_r)$ series, and one Student-$t$ reference with $\nu = 3.5$ scaled to $(\mu_r, \sigma_r)$.
+- **Inference:** for metrics in `DCH_DIMENSION_METRICS` (default **ELLNER**), **LLE**, and (by default) **RQA**, `hypothesis_cli.py` draws **B** stationary-bootstrap replicates (default $B=100$), computes the invariant on each, and uses the bootstrap mean and sample SD as centre and spread.
+- **Decision rule** (per metric $T$):
+
+  $$\mathrm{TS} = \frac{\overline{T}_{\mathrm{boot}} - T_{\mathrm{resh}}}{s_{\mathrm{boot}}}, \qquad \text{reject } H_0 \text{ if } |\mathrm{TS}| > 3$$
+
+  RQA uses the same rule when `--rqa_bootstrap on` (default); recurrence radius $r$ is **locked from the original** series for all bootstrap and reference runs.
 
 ---
 &nbsp;
@@ -179,6 +233,9 @@ Note: **LLE** at N≈100 often returns `insufficient data` with production `tau`
 &nbsp;
 &nbsp;
 &nbsp;
+
+<details>
+<summary><b>Windows CMD primer (batch files)</b> — click to expand</summary>
 
 ## Windows CMD primer (batch files)
 
@@ -370,12 +427,24 @@ In a batch file, **`%%` prints one literal `%` character** (and does **not** exp
 
 Some steps call **`powershell -NoProfile -Command "..."`** to trim the first **`DCH_TEST_POINTS`** lines (default **100**) in test mode. Quotes inside that string use **`!FULL_DATA!`** (delayed expansion) so paths survive the nested quoting. All TISEAN `.bat` files include **`_dch_test_env.bat`** for shared test defaults.
 
+</details>
+
 ---
 &nbsp;
 &nbsp;
 &nbsp;
 
 ## End-to-End Workflow
+
+```mermaid
+flowchart LR
+  S1["1. crypto_data_all"]
+  S2["2. logreturns"]
+  S3["3. liquidity"]
+  S4["4–10. τ, W, cao, 2dc"]
+  S5["11. hypothesis.bat"]
+  S1 --> S2 --> S3 --> S4 --> S5
+```
 
 ### Step 1 - Download raw candles
 
@@ -479,6 +548,37 @@ $env:DCH_RUN_HYPOTHESIS = "false"
 &nbsp;
 ## Distributed Hypothesis Workflow
 
+```mermaid
+flowchart TB
+  subgraph per_coin["Per coin (run2)"]
+    O["original .dat"]
+    R["reshuffle + normal + Student-t"]
+    B["stationary bootstrap"]
+  end
+  subgraph bats["Batch entry points"]
+    CD["correlation_dimension.bat"]
+    LM["Lambda_max.bat"]
+    RQ["RQA.bat"]
+  end
+  subgraph out["Consolidation"]
+    PA["print_results boot_aggregate"]
+    DOC["documents.py"]
+  end
+  O --> CD
+  O --> LM
+  O --> RQ
+  R --> CD
+  R --> LM
+  R --> RQ
+  B --> CD
+  B --> LM
+  B --> RQ
+  CD --> PA
+  LM --> PA
+  RQ --> PA
+  PA --> DOC
+```
+
 ### Why distributed
 
 Each invariant family has different output files, parameterization, and practical compute profile. Running hypothesis testing inside each invariant script keeps:
@@ -518,9 +618,9 @@ All three active invariant scripts respect `DCH_RUN_HYPOTHESIS`. With `DCH_RUN_H
 
 For each original log-return series, `hypothesis.py` constructs:
 
-1. `surr`: one point-wise random permutation of the original observations,
-2. `normal`: one `N(mu_r, sigma_r)` series of the same length,
-3. `t3.5`: one Student-t reference series with `df=3.5`, scaled to the original mean and SD.
+1. `surr` — point-wise random permutation of the original observations,
+2. `normal` — $\mathcal{N}(\mu_r, \sigma_r)$ series of the same length,
+3. `t3.5` — Student-$t$ reference with $\nu=3.5$, scaled to $(\mu_r, \sigma_r)$.
 
 The permutation keeps the marginal mean/SD identical to the original series but destroys temporal order. The Gaussian and Student-t references are reported as descriptive benchmarks, not as the main test pair.
 
@@ -532,22 +632,23 @@ The permutation keeps the marginal mean/SD identical to the original series but 
 
 The current statistical test is:
 
-```text
-TS = (mean_bootstrap(T) - T_reshuffle) / SD_bootstrap(T)
-reject H0 if |TS| > 3
-```
+$$\mathrm{TS} = \frac{\overline{T}_{\mathrm{boot}} - T_{\mathrm{resh}}}{s_{\mathrm{boot}}}, \qquad \text{reject } H_0 \Leftrightarrow |\mathrm{TS}| > 3$$
 
-For selected dimension metrics (**ELLNER** by default; optionally **TAKENS** or **TAKENS+ELLNER**) and for **LLE**, `hypothesis.py` first generates `B=100` stationary-bootstrap pseudo-series from the original series. It computes the invariant for every bootstrap pseudo-series, then calculates:
+For selected dimension metrics (**ELLNER** by default; optionally **TAKENS** or **TAKENS+ELLNER**) and for **LLE**, `hypothesis.py` first generates $B$ stationary-bootstrap pseudo-series (default $B=100$). It computes:
 
-- `boot_mean`: arithmetic mean of the `B` invariant values,
-- `boot_sd`: sample SD of the `B` invariant values,
-- `resh`: invariant value for one fully reshuffled series,
-- `TS=(boot_mean-resh)/boot_sd`.
+- $\overline{T}_{\mathrm{boot}}$ — mean of the $B$ bootstrap invariant values,
+- $s_{\mathrm{boot}}$ — sample SD of the $B$ values,
+- $T_{\mathrm{resh}}$ — invariant on one fully reshuffled series,
+- $\mathrm{TS}$ as above.
 
-If `|TS| > 3`, the null interpretation that the series is only independent random noise is rejected. This is evidence of structure/memory as a prerequisite for chaos, not a proof of chaos. At the current stage:
+If $|\mathrm{TS}| > 3$, the null that the series is independent noise is rejected (evidence of structure/memory, not proof of chaos). At the current stage:
 
-- **TAKENS:** `d2.exe` produces the correlation integral `.c2`. `c2t.exe` turns `.c2` into the Takens-Theiler curve `d_2^(T)(r')` (book eqs. 8.75-8.76). A stable plateau on `d_2^(T)` vs `ln r'` for `#m=3` is detected automatically. The **TAKENS** value is the mean of that plateau; `boot_sd` in the hypothesis table is the sample SD across the `B` bootstrap TAKENS values.
-- **ELLNER:** the same Takens plateau yields `r_min` and `r_max`. Ellner's extension (eq. 8.78) `d_2^(E) = [C^(m)(r_max) - C^(m)(r_min)] / ∫_{r_min}^{r_max} C(r)/r dr` is evaluated directly on `.c2` and stored as the separate **ELLNER** invariant.
+- **TAKENS:** `d2.exe` → `.c2`; `c2t.exe` → $d_2^{(T)}(r')$ (eqs. 8.75–8.76). Plateau mean at $m=3$ is **TAKENS**; $s_{\mathrm{boot}}$ is the SD across bootstrap replicates.
+- **ELLNER:** same plateau defines $r_{\min}, r_{\max}$; eq. 8.78:
+
+  $$d_2^{(E)} = \frac{C^{(m)}(r_{\max}) - C^{(m)}(r_{\min})}{\displaystyle\int_{r_{\min}}^{r_{\max}} \frac{C(r)}{r}\, dr}$$
+
+  evaluated on `.c2` as **ELLNER**.
 - **LLE:** median Kantz slope across usable `lyap_k` ε-blocks at `m=3` (see `invariants_lyapunov.extract_lle_mean_std`). `lyap_k` is called with **`-t<W>`** matching `W_D2_<sym>`. Short test series (≈100 points) may yield `insufficient data` for LLE even when bootstrap runs complete.
 - **RQA:** PyRQA scalars on the full series. Default: **4-th percentile** radius from embedded pairwise distances (`--rqa_radius_mode percentile`), locked from the original for bootstrap/reference runs when `--rqa_bootstrap on`. `RAD_RQA_<sym>` remains a fallback. PyRQA `theiler_corrector` uses `W_D2_<sym>` (mapped from TISEAN Theiler `W` via `tisean_theiler_min_diagonal_k`).
 
@@ -618,8 +719,8 @@ In each `<BASE>_surrogate_summary.txt`, key columns are:
 
 Interpretation:
 
-- `|TS| > 3`: reject `H0` for that metric; the series contains structure/memory relative to independent reshuffling,
-- otherwise: fail to reject `H0`,
+- $|\mathrm{TS}| > 3$: reject $H_0$ for that metric (structure/memory vs. reshuffle),
+- otherwise: fail to reject $H_0$,
 - `nan` / `insufficient data` / `no sd`: bootstrap or reshuffle values missing (common for **LLE** on very short test windows),
 - `not bootstrap-tested`: RQA with `--rqa_bootstrap off`, or metrics outside the active bootstrap set.
 
@@ -862,13 +963,13 @@ Cao, L. (1997). Practical method for determining the minimum embedding dimension
 
 Let `a_i(m)` be the ratio of `(m+1)`-dimensional Chebyshev NN distance to `m`-dimensional NN distance for point `i` (see code: uses `max(nn_distance, |new_coord_diff|)` for the `(m+1)` distance). Then:
 
-- `E(m) = mean_i a_i(m)`
-- `E*(m) = mean_i |x_i^{new} - x_{NN}^{new}|` (average absolute increment on the new coordinate only)
+- $E(m) = \frac{1}{N_{\mathrm{valid}}}\sum_i a_i(m)$
+- $E^*(m) = \frac{1}{N_{\mathrm{valid}}}\sum_i \bigl|x_i^{\mathrm{new}} - x_{\mathrm{NN}}^{\mathrm{new}}\bigr|$ (mean absolute increment on the new coordinate only)
 
-From arrays `E(m)` and `E*(m)` for `m = 1 .. d_max+1`:
+From arrays $E(m)$ and $E^*(m)$ for $m = 1 \ldots d_{\max}+1$:
 
-- `E1(m) = E(m+1) / E(m)` — saturates when embedding dimension is sufficient (false neighbours stop growing).
-- `E2(m) = E*(m+1) / E*(m)` — tends to **1** for stochastic-looking trajectories; deviations support deterministic structure (see Cao, 1997).
+- $E_1(m) = E(m+1) / E(m)$ — saturates when embedding dimension is sufficient (false neighbours stop growing).
+- $E_2(m) = E^*(m+1) / E^*(m)$ — tends to **1** for stochastic-looking trajectories; deviations support deterministic structure (see Cao, 1997).
 
 Returned arrays to plotting are `E1[1:], E2[1:]` indexed by `m = 1..d_max`.
 
@@ -1102,7 +1203,7 @@ For comparison, **Rosenstein’s method** is `lyap_r` (not used in this repo); s
 
 ### `d2` — Grassberger–Procaccia correlation integral
 
-**Role:** estimates the **correlation sum** `C^(m)(r)` and derived **local slopes** for correlation dimension (`D₂`) and related files.
+**Role:** estimates the **correlation sum** $C^{(m)}(r)$ and derived **local slopes** for correlation dimension $D_2$ and related files.
 
 **`-M` syntax:** two integers **`-M <components>,<max_embedding>`** — for a **scalar** series this is **temporal embedding**: first number is components (usually **1**), second is the **maximum number of delays** / embedding dimension **m**. This repo uses `-M1,3`: **m = 1, 2, 3** in one run.
 
@@ -1123,7 +1224,11 @@ Outputs used here:
 - **`.h2`** — same **ε** grid as `.d2`; ordinate is **K2** from `ln C_m − ln C_{m+1}`. It may still be generated by `d2.exe`, but it is not part of the active hypothesis pipeline.
 - **`.c2`** — correlation integral itself; `correlation_dimension.bat` also passes this to `c2t.exe` to produce `*_takens.dat`, `*_takens_all_m.png`, `*_ellner.dat`, per-coin `*_takens_summary.txt`, and the central `_takens_summary.csv` with the Ellner-extension correlation-dimension estimate at `m=3`, plateau point count, and audit columns `r_min_m3` / `r_max_m3`.
 
-`hypothesis.py` now keeps the two dimension estimates separate. **TAKENS** is the mean of the stable plateau on `d_2^(T)(r')` (`#m=3` block in `*_takens.dat`). **ELLNER** uses the plateau end-points as `r_min`/`r_max` and integrates `d_2^(E) = [C^(m)(r_max) − C^(m)(r_min)] / ∫_{r_min}^{r_max} C(r)/r dr` directly on `.c2` (book eq. 8.78). In hypothesis summaries, `boot_sd` is the sample SD across the `B` stationary-bootstrap invariant values for each metric.
+`hypothesis.py` keeps **TAKENS** and **ELLNER** separate. **TAKENS** is the plateau mean of $d_2^{(T)}(r')$ ($m=3$). **ELLNER** uses plateau endpoints $r_{\min}, r_{\max}$ and eq. 8.78:
+
+$$d_2^{(E)} = \frac{C^{(m)}(r_{\max}) - C^{(m)}(r_{\min})}{\displaystyle\int_{r_{\min}}^{r_{\max}} \frac{C(r)}{r}\, dr}$$
+
+In summaries, $s_{\mathrm{boot}}$ is the sample SD across $B$ bootstrap replicates per metric.
 
 Manual: [d2](https://www.pks.mpg.de/tisean/Tisean_3.0.1/docs/docs_c/d2.html).
 

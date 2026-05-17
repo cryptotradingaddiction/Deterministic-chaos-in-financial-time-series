@@ -46,7 +46,7 @@ DEFAULT_CONFIG = {
         # null = use the last timestamp in each file (no artificial cutoff).
         "analysis_end": None,
         # Used only when mode is "fixed" or "fixed_date": number of trailing samples to keep.
-        "fixed_tail_points": 1000,
+        "fixed_tail_points": 17520,
         # When True, liquidity.py writes *_logreturns_cut.* siblings used by the active pipeline.
         "create_cut_files": True,
         "create_backup_before_cut": True,

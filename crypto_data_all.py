@@ -6,7 +6,8 @@ Bitstamp (or any CCXT-supported exchange). It performs rigorous checks to ensure
 no single hour is missing within the downloaded range and that the data
 realistically covers the requested date span. After validation, the full
 contiguous downloaded range is exported; downstream scripts then compute
-log-returns and `liquidity.py` applies the final liquid analysis window.
+log-returns and `liquidity.py` applies the final analysis window (liquidity rule
+or fixed dates from `config.yaml`).
 """
 
 import ccxt
@@ -46,7 +47,8 @@ PAIR_START_DATES = {
 
 # Date range override from config.yaml:
 # - download.from: global start date override (optional)
-# - download.to: global end date override (optional)
+# - download.to: global end date override (optional); if omitted, current UTC date is used.
+# There is no hardcoded pipeline end date in this script.
 GLOBAL_FROM_STR, END_DATE_STR = get_download_range(CONFIG)
 
 # Create the output directory if it does not already exist.

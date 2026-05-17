@@ -387,7 +387,7 @@ def cmd_lyap(path, _n=None):
     if not by_dim:
         print("  [WARN] No lyap blocks parsed")
         return
-    print("  Diagnostic largest-Lyapunov slopes from lyap_k S(t) (first epsilon block):")
+    print("  Diagnostic lyap_k slopes (first epsilon block per m; hypothesis LLE uses median over blocks):")
     print(f"  {'m':>4}  {'lambda':>10}  {'pts':>5}")
     lambdas = []
     for m in sorted(by_dim.keys()):
@@ -467,7 +467,8 @@ def _parse_bootstrap_summary(path):
         info["format"] = "stationary_bootstrap_ts"
         info["symbol"] = m.group(1).strip()
         pm = re.search(
-            r"Parameters:\s*tau=(\d+),\s*W=(\d+),\s*B=(\d+),\s*stationary_block_mean=([^,]+),\s*TS_threshold=([0-9.]+)",
+            r"Parameters:\s*tau=(\d+),\s*W=(\d+),"
+            r"(?:\s*seed=\d+,)?\s*B=(\d+),\s*stationary_block_mean=([^,]+),\s*TS_threshold=([0-9.]+)",
             text,
         )
         if pm:
@@ -902,9 +903,10 @@ def cmd_boot_aggregate(path, _n=None):
             if is_stationary:
                 fh.write(
                     "\nCurrent format: stationary-bootstrap TS test. "
-                    "For TAKENS/ELLNER/LLE, boot is the mean across B stationary-bootstrap invariant values, "
-                    "boot_sd is their sample SD, resh is one fully reshuffled invariant, and "
-                    "TS=(boot-resh)/boot_sd. Reject H0 when |TS|>3.\n\n"
+                    "boot = mean across B bootstrap invariant values, boot_sd = sample SD, "
+                    "surr/resh = one fully reshuffled invariant, TS=(boot-surr)/boot_sd. "
+                    "Active metrics include TAKENS/ELLNER/LLE and (when enabled) RQA scalars. "
+                    "Reject H0 when |TS|>3.\n\n"
                 )
             else:
                 fh.write(

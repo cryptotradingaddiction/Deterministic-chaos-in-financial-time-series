@@ -16,11 +16,20 @@ import matplotlib.pyplot as plt
 import sys
 import time
 import os
-from config_loader import load_config, get_data_dir, get_results_dir, ensure_dir, prefer_liquidity_cut
+from config_loader import (
+    load_config,
+    get_data_dir,
+    get_results_dir,
+    ensure_dir,
+    prefer_liquidity_cut,
+    MUTUAL_SUMMARY_SERIES_COL_W,
+    sync_per_coin_bat_tau_from_mutual_summary,
+    default_per_coin_settings_bat_path,
+)
 from report_helper import Reporter, append_summary_row
 
 SUMMARY_FILE = "_mi_summary.txt"
-SERIES_COL_W = 46
+SERIES_COL_W = MUTUAL_SUMMARY_SERIES_COL_W
 SUMMARY_HEADER = (
     f"{'series_id':<{SERIES_COL_W}} {'N':>8} {'max_tau':>8} {'first_min_tau':>14} "
     f"{'I(first_min) [bits]':>22} {'I(tau=1) [bits]':>16}"
@@ -358,3 +367,22 @@ if __name__ == "__main__":
             print(f"File not found, skipping: {file_path}")
             continue
         process_file(file_path, output_dir, max_tau=DEFAULT_MAX_TAU)
+
+    status, n_sym = sync_per_coin_bat_tau_from_mutual_summary(config)
+    if status == "updated":
+        print(f"Updated _per_coin_settings.bat from mutual summary ({n_sym} symbol(s)).")
+    elif status == "unchanged":
+        print(
+            f"Parsed {n_sym} first-minimum tau(s) from _mi_summary.txt; "
+            "_per_coin_settings.bat already matched (no rewrite)."
+        )
+    elif status == "no_bat":
+        print(
+            f"Parsed {n_sym} tau(s) but _per_coin_settings.bat not found at "
+            f"{default_per_coin_settings_bat_path()} — skipped sync."
+        )
+    else:
+        print(
+            "No first-minimum tau rows parsed from _mi_summary.txt "
+            "(missing file, wrong format, or all 'none'); bat unchanged."
+        )

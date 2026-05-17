@@ -11,6 +11,20 @@ download:
   # If null, current UTC date is used automatically.
   to: null
 
+liquidity:
+  # "liquidity" = first time the rolling % of zero log-returns stays below `tolerance`;
+  # "fixed" = keep only the last `fixed_tail_points` rows (e.g. 17520 hours). Legacy alias: "fixed_date".
+  mode: fixed
+  window_size: 720
+  tolerance: 1.0
+  # In liquidity mode only: optional last timestamp to include (string or null).
+  # null = use the last hour present in each file (no artificial cutoff).
+  analysis_end: null
+  # In fixed mode only: trailing sample count (same length for every coin after cut).
+  fixed_tail_points: 17520
+  create_cut_files: true
+  create_backup_before_cut: true
+
 files:
   # Canonical filename suffixes used in this project.
   raw_csv_suffix: "_BITSTAMP_1h_complete.csv"

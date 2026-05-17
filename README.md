@@ -8,7 +8,7 @@ This project combines:
 - log-return preprocessing,
 - invariant estimation via TISEAN,
 - recurrence quantification via `PyRQA`,
-- stationary-bootstrap/reference testing with point-wise reshuffle, Gaussian and Student-t reference series, and a `TS` decision rule for dimension metrics (`ELLNER` by default, optionally `TAKENS` or `TAKENS,ELLNER`) plus `LLE`.
+- stationary-bootstrap/reference testing with point-wise reshuffle, Gaussian and Student-t reference series, and a `TS` decision rule for dimension metrics (`ELLNER` by default, optionally `TAKENS` or `TAKENS,ELLNER`), **LLE**, and (by default) **RQA** scalars.
 
 ---
 
@@ -68,8 +68,8 @@ The hypothesis part is distributed across per-invariant batch scripts and consol
 ### Statistical model currently used
 
 - Null/reference series: one point-wise reshuffle (`randperm`, no blocks), one Gaussian `N(mu_r, sigma_r)` series, and one Student-t series with `df=3.5` scaled to `(mu_r, sigma_r)`.
-- **Inference:** for dimension metrics selected by `DCH_DIMENSION_METRICS` (`ELLNER` by default; valid values include `TAKENS`, `ELLNER`, `TAKENS,ELLNER`) and for `LLE`, `hypothesis.py` generates **B=100 stationary-bootstrap** pseudo-series from the original, computes the invariant on each one, and uses their mean and sample SD as the robust reference centre and spread.
-- Decision rule: compare that bootstrap centre with one fully reshuffled invariant via `TS=(mean_boot-reshuffle)/SD_boot`; reject `H0` if `|TS| > 3`. **RQA** remains an original-series scalar summary and is not bootstrap-tested.
+- **Inference:** for dimension metrics selected by `DCH_DIMENSION_METRICS` (`ELLNER` by default; valid values include `TAKENS`, `ELLNER`, `TAKENS,ELLNER`), for **LLE**, and (by default) for **RQA** scalars (`RR`, `DET`, `LAM`, `MAXLINE`, `ENTR`, `TT`, `TREND`), `hypothesis.py` / `hypothesis_cli.py` generates **B** stationary-bootstrap pseudo-series from the original (default **B=100**, overridable), computes the invariant on each one, and uses their mean and sample SD as the robust reference centre and spread.
+- Decision rule: compare that bootstrap centre with one fully reshuffled invariant via `TS=(mean_boot-reshuffle)/SD_boot`; reject `H0` if `|TS| > 3`. RQA uses the same rule when `--rqa_bootstrap on` (default); the recurrence radius is **locked from the original series** so every bootstrap and reference run shares the same `r`.
 
 ---
 
@@ -99,10 +99,14 @@ Optional environment overrides (no code changes):
 
 | Variable | Effect |
 |----------|--------|
-| `TISEAN_BIN` | Directory searched first for `d2.exe`, `lyap_k.exe`, `recurr.exe` when `hypothesis.py` resolves tools (falls back to `C:\DCh\Tisean_3.0.0\bin`, then `PATH`). |
-| `DCH_TEST_MODE` | If set to `true`, active `.bat` scripts treat `TEST_MODE` as true (first **2000** points per series, output roots `*_test_2000`), overriding their internal default. |
+| `TISEAN_BIN` | Directory searched first for `d2.exe`, `lyap_k.exe`, `recurr.exe` when Python resolves tools (falls back to `C:\DCh\Tisean_3.0.0\bin`, then `PATH`). |
+| `DCH_TEST_MODE` | If set to `true`, active `.bat` scripts treat `TEST_MODE` as true (first **`DCH_TEST_POINTS`** rows per series, default **100** via `_dch_test_env.bat`), output roots such as `*_test_100`. |
+| `DCH_TEST_POINTS` | Number of rows copied in test mode (default **100**). Used by `.bat` files and `config_loader.dch_test_point_count()`. |
 | `DCH_RUN_HYPOTHESIS` | If set to `false`, active invariant `.bat` scripts compute only the invariant outputs/plots and skip `hypothesis.py` plus `_hypothesis_aggregate_summary.txt` aggregation. Default is `true`. |
 | `DCH_DIMENSION_METRICS` | Controls which dimension metrics `correlation_dimension.bat` sends to `hypothesis.py`. Default: `ELLNER`. Valid practical values: `ELLNER`, `TAKENS`, `TAKENS,ELLNER`. |
+| `DCH_BOOTSTRAP_SAMPLES` | Default for `hypothesis.py --bootstrap_samples` when the CLI flag is omitted (desktop sets this from the GUI spinbox). |
+| `DCH_LYAP_STEPS` | `lyap_k -n` in test mode (default **40** when `DCH_TEST_MODE=true`). |
+| `DCH_LYAP_MIN_NEIGHBORS` | `lyap_k -s` and LLE block filter in test mode (default **3** when `DCH_TEST_MODE=true`). |
 
 ### 3) Prepare config
 
@@ -116,12 +120,43 @@ paths:
 download:
   from: null
   to: null
+
+liquidity:
+  mode: fixed              # active pipeline: last fixed_tail_points hours; use liquidity for rolling zero-% start
+  window_size: 720
+  tolerance: 1.0
+  analysis_end: null      # liquidity mode only: null = through last sample
+  fixed_tail_points: 17520  # fixed mode: last N rows
+  create_cut_files: true
+  create_backup_before_cut: true
 ```
 
 Notes:
 
 - if `download.from` is `null`, downloader uses default per-asset start settings;
 - if `download.to` is `null`, downloader uses current UTC date.
+- `liquidity` controls how `liquidity.py` builds `*_logreturns_cut.*` (see `config.example.yaml` for full comments). **Fixed** mode keeps the last **`fixed_tail_points`** hourly samples (no calendar from/to).
+
+### 4) Smoke test (optional)
+
+**Fast TISEAN + hypothesis** (first **100** points per series):
+
+```bat
+cd /d C:\DCh\Tisean_3.0.0\bin
+set DCH_TEST_MODE=true
+hypothesis.bat
+```
+
+**Hypothesis modules only** (no full TISEAN pipeline):
+
+```bat
+cd /d C:\DCh
+py -3 test_hypothesis_stack.py
+```
+
+**Desktop:** `py -3 C:\DCh\desktop_app.py`, enable **TEST_MODE**, then **Run full** or run step **11. hypothesis** alone.
+
+Note: **LLE** at N≈100 often returns `insufficient data` with production `tau`/`W`; use full mode or longer cuts for meaningful Lyapunov estimates.
 
 ---
 
@@ -264,7 +299,7 @@ In a batch file, **`%%` prints one literal `%` character** (and does **not** exp
 
 ### Where PowerShell appears
 
-Some steps call **`powershell -NoProfile -Command "..."`** to trim the first 2000 lines in test mode. Quotes inside that string use **`!FULL_DATA!`** (delayed expansion) so paths survive the nested quoting.
+Some steps call **`powershell -NoProfile -Command "..."`** to trim the first **`DCH_TEST_POINTS`** lines (default **100**) in test mode. Quotes inside that string use **`!FULL_DATA!`** (delayed expansion) so paths survive the nested quoting. All TISEAN `.bat` files include **`_dch_test_env.bat`** for shared test defaults.
 
 ---
 
@@ -296,7 +331,30 @@ Output examples:
 - `BTCUSD_BITSTAMP_1h_complete_logreturns.dat`
 - `BTCUSD_BITSTAMP_1h_complete_logreturns.csv`
 
-### Step 3 - Run distributed nonlinear pipeline
+### Step 3 - Liquidity cut (active analysis window)
+
+```bat
+py -3 C:\DCh\liquidity.py
+```
+
+Produces `*_logreturns_cut.dat` / `.csv` used by later diagnostics and TISEAN steps.
+
+### Step 4 - Embedding diagnostics (recommended before TISEAN)
+
+```bat
+py -3 C:\DCh\mutual.py
+py -3 C:\DCh\tau_w.py
+cd /d C:\DCh\Tisean_3.0.0\bin
+theilers_w.bat
+py -3 C:\DCh\phase_2D.py
+py -3 C:\DCh\phase_3D.py
+py -3 C:\DCh\cao_.py
+py -3 C:\DCh\2dc.py
+```
+
+`theilers_w.bat` runs `corr.exe` + `stp.exe` for diagnostic ACF/STP PNGs, sets **`W_final := TAU_D2_<sym>`** (rule **W = τ**), and syncs **`W_D2_<sym>`** in `_per_coin_settings.bat`.
+
+### Step 5 - Run distributed nonlinear pipeline
 
 ```bat
 cd /d C:\DCh\Tisean_3.0.0\bin
@@ -305,10 +363,10 @@ hypothesis.bat
 
 What happens per symbol:
 
-1. Correlation-dimension script computes `.c2` / `.d2` / Takens outputs and runs the dimension stationary-bootstrap test (`ELLNER` by default; controlled by `DCH_DIMENSION_METRICS`).
-2. LLE script computes baseline outputs and reports the original-series Kantz scalar estimate (`lyap_k -m3 -M3 -n500 -s10`).
-3. RQA script computes recurrence outputs and scalar RQA values for the original series.
-4. Each active script aggregates its own surrogate summaries.
+1. **Correlation dimension** — `d2.exe` / `c2t.exe`, Takens/Ellner plots, dimension bootstrap test (`DCH_DIMENSION_METRICS`, default `ELLNER`).
+2. **LLE** — `lyap_k.exe` with **`-t<W>`** (same `W_D2_<sym>` as `d2`), LLE bootstrap test.
+3. **RQA** — `rqa_radius.py` → `recurr.exe`, `rqa_values.py`, RQA bootstrap test with **fixed** radius from the original series.
+4. Each script writes `*_surrogate_summary.txt` and `_hypothesis_aggregate_summary.txt` where applicable; the wrapper builds **`results.docx`**.
 
 Set `DCH_RUN_HYPOTHESIS=false` before running a single invariant script (or the wrapper) when you want only the raw invariant outputs and plots:
 
@@ -340,13 +398,13 @@ Each invariant family has different output files, parameterization, and practica
 
 - `correlation_dimension.bat` -> `hypothesis.py --metrics_list %DCH_DIMENSION_METRICS%` (default `ELLNER`; can be `TAKENS` or `TAKENS,ELLNER`)
 - `Lambda_max.bat` -> `hypothesis.py --metrics_list LLE`
-- `RQA.bat` -> computes the 4-th percentile RQA radius first, uses it for `recurr.exe -r<radius>`, then calls `hypothesis.py --metrics_list RR,DET,LAM,MAXLINE,ENTR,TT,TREND --rqa_radius <effective_radius>` (the explicit radius is still a fallback inside `hypothesis.py`; see `--rqa_radius_mode`/`--rqa_percentile`).
+- `RQA.bat` -> `rqa_radius.py` (percentile radius for plots) → `recurr.exe` → `rqa_values.py` → `hypothesis.py --metrics_list RR,DET,LAM,MAXLINE,ENTR,TT,TREND --rqa_radius <r> --rqa_radius_mode fixed` (radius locked for bootstrap/reference runs).
 
 All three active invariant scripts respect `DCH_RUN_HYPOTHESIS`. With `DCH_RUN_HYPOTHESIS=false`, these `hypothesis.py` calls and the final `print_results.py boot_aggregate` step are skipped; the main TISEAN/PyRQA outputs are still produced.
 
 ### Wrapper behavior
 
-`hypothesis.bat` no longer contains monolithic fixed-parameter hypothesis logic; it orchestrates the three active scripts above in sequence. `correlation_entropy.bat` was removed from the active pipeline.
+`hypothesis.bat` no longer contains monolithic fixed-parameter hypothesis logic; it orchestrates the three active scripts above in sequence, then runs **`documents.py`** to refresh **`results.docx`** under **`paths.results_dir`** from `config.yaml` and opens it with the default Windows handler (if the file exists). `correlation_entropy.bat` was removed from the active pipeline.
 
 ---
 
@@ -382,10 +440,10 @@ If `|TS| > 3`, the null interpretation that the series is only independent rando
 
 - **TAKENS:** `d2.exe` produces the correlation integral `.c2`. `c2t.exe` turns `.c2` into the Takens-Theiler curve `d_2^(T)(r')` (book eqs. 8.75-8.76). A stable plateau on `d_2^(T)` vs `ln r'` for `#m=3` is detected automatically. The **TAKENS** value is the mean of that plateau; `boot_sd` in the hypothesis table is the sample SD across the `B` bootstrap TAKENS values.
 - **ELLNER:** the same Takens plateau yields `r_min` and `r_max`. Ellner's extension (eq. 8.78) `d_2^(E) = [C^(m)(r_max) - C^(m)(r_min)] / ∫_{r_min}^{r_max} C(r)/r dr` is evaluated directly on `.c2` and stored as the separate **ELLNER** invariant.
-- **LLE:** computed as one Kantz estimate from the slope of `S(t)` for `m=3`; it now uses the same stationary-bootstrap TS test as TAKENS/ELLNER.
-- **RQA:** computed once on the full original time series; it is not part of the bootstrap TS test. The recurrence radius is selected dynamically as the **4-th percentile of pairwise Euclidean distances between embedded state vectors** of the analysed series (per `rqa_tran.pdf`), instead of the fixed `RAD_RQA_<sym>` from `_per_coin_settings.bat`. The same effective radius is used for the TISEAN `recurr.exe` plot, `rqa_values.py`, and the RQA branch of `hypothesis.py`. This keeps the recurrence rate roughly invariant across coins, embedding dimensions, and window lengths. The per-coin value from `_per_coin_settings.bat` is kept only as fallback when the percentile cannot be computed.
+- **LLE:** median Kantz slope across usable `lyap_k` ε-blocks at `m=3` (see `invariants_lyapunov.extract_lle_mean_std`). `lyap_k` is called with **`-t<W>`** matching `W_D2_<sym>`. Short test series (≈100 points) may yield `insufficient data` for LLE even when bootstrap runs complete.
+- **RQA:** PyRQA scalars on the full series. Default: **4-th percentile** radius from embedded pairwise distances (`--rqa_radius_mode percentile`), locked from the original for bootstrap/reference runs when `--rqa_bootstrap on`. `RAD_RQA_<sym>` remains a fallback. PyRQA `theiler_corrector` uses `W_D2_<sym>` (mapped from TISEAN Theiler `W` via `tisean_theiler_min_diagonal_k`).
 
-Bootstrap/reference invariant recomputation is therefore performed for the selected dimension metrics (`ELLNER` by default) and for `LLE`. RQA test columns remain `nan` / `not bootstrap-tested` by design.
+Use `--rqa_bootstrap off` for legacy original-only RQA (no TS column). `--seed` (default `0`) fixes reshuffle, reference series, and bootstrap draws.
 
 `d2.exe` currently runs with `-M1,3 -#100 -N0`, matching `EMBED=1,3` in `correlation_dimension.bat`. `-#100` fixes the epsilon grid size explicitly and `-N0` uses all available pairs instead of TISEAN's default pair cap. The radius scan is otherwise left at the TISEAN default so the `.d2` diagnostic plot and the `.c2` input for `c2t.exe` cover the full available scale range; the practical scale choice is made afterwards by plateau detection on the Takens curve.
 
@@ -397,9 +455,10 @@ Bootstrap/reference invariant recomputation is therefore performed for the selec
 
 Typical folders under `C:\DCh\data\results`:
 
-- `correlation_dimension_test_2000` / `correlation_dimension_full`
-- `lambda_max_test_2000` / `lambda_max_full`
-- `rqa_test_2000` / `rqa_full`
+- `correlation_dimension_test_100` / `correlation_dimension_full` (test suffix is `test_<N>`; default **N=100**)
+- `lambda_max_test_100` / `lambda_max_full`
+- `rqa_test_100` / `rqa_full`
+- `theiler_w_test_100` / `theiler_w` — per-coin ACF/STP plots and `_theiler_summary.txt`
 
 ### Per-coin run folder pattern
 
@@ -413,10 +472,9 @@ Inside these, you get:
 - raw TISEAN outputs (`.d2`, `.h2`, `.c2`, recurrence listings `*_recurr.txt`, etc.),
 - optional plot images (`.png`) if gnuplot is available,
 - hypothesis subfolders such as:
-  - `hypothesis_d2`,
-  - `hypothesis_k2`,
-  - `hypothesis_lle`,
-  - `hypothesis_rqa`.
+  - `hypothesis_d2` (dimension metrics from `correlation_dimension.bat`),
+  - `hypothesis_lle` (from `Lambda_max.bat`),
+  - `hypothesis_rqa` (from `RQA.bat`).
 
 Summary file naming:
 
@@ -444,9 +502,10 @@ Interpretation:
 
 - `|TS| > 3`: reject `H0` for that metric; the series contains structure/memory relative to independent reshuffling,
 - otherwise: fail to reject `H0`,
-- `nan` / `not bootstrap-tested`: no stationary-bootstrap TS test is defined for that output, currently only the RQA branch.
+- `nan` / `insufficient data` / `no sd`: bootstrap or reshuffle values missing (common for **LLE** on very short test windows),
+- `not bootstrap-tested`: RQA with `--rqa_bootstrap off`, or metrics outside the active bootstrap set.
 
-When `print_results.py boot_aggregate` builds the compact table, column **`rej_all`** is **YES** only if every metric present in that summary rejects `H0`. For RQA summaries this will normally be **NO** because the bootstrap TS test is unavailable.
+When `print_results.py boot_aggregate` builds the compact table, column **`rej_all`** is **YES** only if every bootstrap-tested metric in that summary rejects `H0`.
 
 ---
 
@@ -458,15 +517,16 @@ Single source of truth:
 
 Used variables:
 
-- `TAU_D2_<sym>`, `W_D2_<sym>` for the Takens/Ellner dimension branch,
+- `TAU_D2_<sym>`, `W_D2_<sym>` for the Takens/Ellner branch (**`W_D2_<sym> := TAU_D2_<sym>`** after `theilers_w.bat`),
 - `TAU_LLE_<sym>` for LLE branch,
 - `TAU_RQA_<sym>`, `RAD_RQA_<sym>` for RQA branch.
 
 Operational notes:
 
 - edit one place, all active scripts inherit updates;
-- `DCH_TEST_MODE` can override per-script `TEST_MODE` defaults;
-- GUI forwards this mode through environment variable for consistency.
+- run **`theilers_w.bat`** (or desktop step 6) before hypothesis so **`W_D2_<sym>`** is synced to **`TAU_D2_<sym>`**;
+- `DCH_TEST_MODE` / `DCH_TEST_POINTS` override per-script `TEST_MODE` and trim length;
+- desktop GUI forwards test mode, hypothesis toggle, dimension metrics, and bootstrap **B** via environment variables.
 
 ---
 
@@ -474,24 +534,35 @@ Operational notes:
 
 ### Core pipeline scripts
 
-- `crypto_data_all.py` - download market data and export the latest one-year window.
+- `crypto_data_all.py` - download market data and export the contiguous Bitstamp history.
 - `compute_logreturns.py` - build log-return datasets.
-- `hypothesis.py` - stationary-bootstrap/reference generation, metric recomputation, and TS inference for selected dimension metrics (`ELLNER` by default; optionally `TAKENS` or both) and `LLE`.
+- `liquidity.py` - build `*_logreturns_cut.*` (active analysis window).
+- `hypothesis.py` - thin **CLI entry point + re-exports** (backward compatible with `rqa_radius.py`, `plot_lyap_k_output.py`).
+- `hypothesis_cli.py` - argparse, stationary bootstrap, TS table, summary writer.
+- `hypothesis_config.py` - shared constants and metric registry.
+- `hypothesis_surrogates.py`, `hypothesis_ts.py` - reference series and TS decision rule.
+- `invariants_compute.py` - dispatch `compute_invariants()` (TISEAN + PyRQA per metric set).
+- `invariants_correlation.py`, `invariants_lyapunov.py`, `invariants_rqa.py` - metric extractors.
+- `tisean_io.py` - `run_d2`, `run_c2t`, `run_lyap_k`, parsers.
 - `print_results.py` - parse/print/aggregate outputs and surrogate summaries.
+- `documents.py` - build **`results.docx`** from aggregate summaries; invoked at the end of `hypothesis.bat`.
+- `test_hypothesis_stack.py` - integration smoke test (imports, `rqa_radius.py`, short `hypothesis.py` runs on 100-point BTC cut).
 
 ### Batch orchestrators
 
-- `Tisean_3.0.0\bin\hypothesis.bat` - wrapper orchestrator.
-- `Tisean_3.0.0\bin\correlation_dimension.bat` - correlation-dimension pipeline (`d2.exe`, `c2t.exe`, Takens/Ellner estimates) + dimension hypothesis call controlled by `DCH_DIMENSION_METRICS`.
-- `Tisean_3.0.0\bin\Lambda_max.bat` - LLE pipeline + LLE hypothesis call.
-- `Tisean_3.0.0\bin\RQA.bat` - recurrence/RQA pipeline + RQA scalar summary call.
-- `Tisean_3.0.0\bin\_per_coin_settings.bat` - per-coin parameters.
+- `Tisean_3.0.0\bin\_dch_test_env.bat` - shared `DCH_TEST_POINTS` (default 100) and test-mode `lyap_k` defaults.
+- `Tisean_3.0.0\bin\hypothesis.bat` - wrapper (dimension + LLE + RQA), then `documents.py` → `results.docx`.
+- `Tisean_3.0.0\bin\correlation_dimension.bat` - `d2.exe`, `c2t.exe`, Takens/Ellner + dimension hypothesis (`DCH_DIMENSION_METRICS`).
+- `Tisean_3.0.0\bin\Lambda_max.bat` - `lyap_k.exe` with `-t<W>` + LLE hypothesis.
+- `Tisean_3.0.0\bin\RQA.bat` - `recurr.exe`, `rqa_values.py`, RQA hypothesis (`--rqa_radius_mode fixed` + radius from `rqa_radius.py`).
+- `Tisean_3.0.0\bin\theilers_w.bat` - `corr.exe`, `stp.exe`, `detect_theiler.py` (W := τ); gnuplot ACF + STP PNGs.
+- `Tisean_3.0.0\bin\_per_coin_settings.bat` - per-coin `TAU_*`, `W_D2_*`, `RAD_RQA_*`.
 
 ### Analytical helpers
 
-- `mutual.py`, `tau_w.py`, `cao_.py`, `2dc.py`, `phase_2D.py`, `phase_3D.py`, `rqa_values.py`, `report_helper.py`.
+- `mutual.py`, `tau_w.py`, `cao_.py`, `2dc.py`, `phase_2D.py`, `phase_3D.py`, `rqa_values.py`, `rqa_radius.py`, `plot_lyap_k_output.py`, `report_helper.py`.
 
-### Config/build
+### Config / GUI
 
 - `config.yaml`, `config.example.yaml`, `config_loader.py`
 - `desktop_app.py`, `build_desktop_app.bat`, `DChPipelineApp.spec`
@@ -554,7 +625,7 @@ Written under `paths.results_dir/mutual/`:
 ### Inputs and data selection
 
 - Hard-coded list of seven `*_BITSTAMP_1h_complete_logreturns.dat` names (edit in `if __name__ == "__main__"` block).
-- **Data length**: `crypto_data_all.py` exports the full contiguous Bitstamp range. `compute_logreturns.py` computes log-returns for that full range, and `liquidity.py` creates the active `*_logreturns_cut.*` files from the first liquid timestamp through `2026-05-02 20:00:00`. `prefer_liquidity_cut` redirects callers to those cut files and fails if they are missing.
+- **Data length**: `crypto_data_all.py` exports the full contiguous Bitstamp range (end date from `download.to` or “today”, never a hardcoded calendar cap). `compute_logreturns.py` computes log-returns for that full range, and `liquidity.py` writes the active `*_logreturns_cut.*` files. Windowing is controlled by `config.yaml` → `liquidity`: either the rolling zero-return **liquidity** rule (optional `analysis_end`; `null` means through the last sample) or **fixed** mode, which keeps the last **`fixed_tail_points`** rows (same trailing length for every series). Legacy YAML value **`fixed_date`** is accepted as an alias for **fixed**. `prefer_liquidity_cut` redirects callers to those cut files and fails if they are missing.
 
 ### How to run
 
@@ -566,7 +637,7 @@ No argparse; all paths from `config.yaml`. To extend symbols or τ range, edit t
 
 ### Relation to the main pipeline
 
-Chosen τ is **only advisory** for `_per_coin_settings.bat`; batch pipelines do not read `mutual.py` outputs automatically.
+Chosen τ from the **first local minimum** of Fraser–Swinney mutual information is written to ``mutual/_mi_summary.txt``. Python tools (**`2dc.py`**, **`phase_2D.py`**, **`phase_3D.py`**, **`cao_.py`**) read that file via ``config_loader.tau_for_symbol_from_mutual`` (with legacy fallbacks if the summary is missing). At the end of each **`mutual.py``** run, **`sync_per_coin_bat_tau_from_mutual_summary`** updates ``TAU_D2_*``, ``TAU_LLE_*``, and ``TAU_RQA_*`` in ``_per_coin_settings.bat`` so TISEAN batches and ``hypothesis.py`` use the same delays.
 
 ---
 
@@ -707,13 +778,16 @@ Same scaling idea (count occupied ε-boxes in embedding space); here it is **imp
 
 ## TISEAN Binaries Used (Active Pipeline)
 
-`hypothesis.bat` runs four orchestrators. Only **three** executables appear on the command lines that ship with this repo:
+`hypothesis.bat` orchestrates three invariant pipelines. Additional TISEAN tools run in **`theilers_w.bat`** (before hypothesis in the desktop chain):
 
 | Binary | Scientific role | Primary outputs |
 |--------|-----------------|-----------------|
 | `d2.exe` | Grassberger–Procaccia correlation integral / local slopes `D₂(ε,m)`; auxiliary `.h2`, `.c2` | `<BASE>.d2`, `.h2`, `.c2` |
 | `lyap_k.exe` | Kantz method — divergence curves `S(t)` vs iteration | `<BASE>_lyap.txt` |
 | `recurr.exe` | Recurrence matrix (sparse listing) | `<BASE>_recurr.txt` (saved with `.txt` in this repo to avoid Windows `.rec` associations) |
+| `corr.exe` | Autocorrelation (Theiler estimate) | used by `theilers_w.bat` / `detect_theiler.py` |
+| `stp.exe` | Space-time separation plot | STP PNGs + Theiler saturation bands |
+| `c2t.exe` | Takens curve from `.c2` | `<BASE>_takens.dat` (in `correlation_dimension.bat`) |
 
 ### Where to read the full manuals
 
@@ -757,18 +831,17 @@ General conventions (`-l`, `-x`, `-c`, `-d`, `-m`/`-M`, `-t`, `-r`/`-R`, …) ar
 **This repository’s `Lambda_max.bat` line** uses:
 
 ```text
-lyap_k.exe -d<tau> -m3 -M3 -n500 -s10 -o "<OUT>\<BASE>_lyap.txt" "<DATA.dat>"
+lyap_k.exe -d<tau> -m3 -M3 -t<W> -n<steps> -s<min_neighbors> -o "<OUT>\<BASE>_lyap.txt" "<DATA.dat>"
 ```
 
 Interpretation:
 
 - **Embedding dimension is fixed at m = 3** (`-m3 -M3`).
-- **`-n500` sets 500 reference points**, matching the book-scale recommendation for the number of orbit centres.
-- **`-s10` sets the minimum neighbourhood size / neighbour count used by `lyap_k` to 10**, matching the book-scale recommendation for `|U_k|`. This is also used by `hypothesis.py` in `run_lyap_k`.
-- **`-t` is not passed** to `lyap_k.exe` here → Theiler exclusion inside `lyap_k` defaults to **0**. **`hypothesis.py`** also calls `lyap_k` **without** `-t` (see `run_lyap_k`); `--theiler` from `W_D2_<sym>` is applied to **`d2`** and **PyRQA**, not to Kantz `lyap_k`. To align Lyapunov with the same temporal decorrelation as `d2`, add `-t<W>` consistently to both the BAT and `run_lyap_k`.
+- **`-t<W>`** uses **`W_D2_<sym>`** from `theilers_w.bat` (same temporal exclusion as `d2.exe -t<W>`). **`tisean_io.run_lyap_k`** passes the same `-t` when `hypothesis.py` recomputes LLE.
+- **Full mode:** `-n500 -s10` (defaults in `Lambda_max.bat`). **Test mode:** `-n` / `-s` from `DCH_LYAP_STEPS` / `DCH_LYAP_MIN_NEIGHBORS` (defaults **40** / **3** via `_dch_test_env.bat`).
 - Neighbourhood search uses **TISEAN defaults** for `-r` and `-R` (because the flags are omitted): approximately data interval / 1000 and data interval / 100.
 - **Gnuplot (`Lambda_max.bat`):** each output **block** is one **ε-scan** at fixed embedding dimension (`#epsilon= … dim= …`). Legends label **ε blocks**, not different **m**.
-- **Hypothesis recomputation:** LLE is treated as one Kantz estimate from the slope of the linear part of `S(t)` for `m=3`, so LLE is not included in the stationary-bootstrap TS test.
+- **Hypothesis:** median Kantz slope across usable ε-blocks; included in the stationary-bootstrap **TS** test like dimension metrics.
 
 For comparison, **Rosenstein’s method** is `lyap_r` (not used in this repo); see [lyap_r](https://www.pks.mpg.de/tisean/Tisean_3.0.1/docs/docs_c/lyap_r.html).
 
@@ -836,16 +909,17 @@ d2.exe -d<tau> -M1,3 -t<W> -#100 -N0 -o "<OUT>\<BASE>" "<DATA.dat>"
 - `-#100` fixes 100 epsilon values; `-N0` uses all pairs rather than the default cap.
 - `correlation_dimension.bat` additionally runs `c2t.exe -V0 -o "<BASE>_takens.dat" "<BASE>.c2"` inside the output directory to avoid the FORTRAN path-length limit.
 - Per coin: `tau = TAU_D2_<sym>`, `W = W_D2_<sym>` from `_per_coin_settings.bat` (defaults `3` / `0` if unset).
-- TEST mode: first **2000** samples copied to a temp `.dat` under `data\results_test_2000`.
+- TEST mode: first **`DCH_TEST_POINTS`** samples (default **100**) copied to a temp `.dat` under `data\results_test_<N>`; output root `correlation_dimension_test_<N>`.
 
 **Lambda / LLE** (`Lambda_max.bat`):
 
 ```text
-lyap_k.exe -d<tau> -m3 -M3 -n500 -s10 -o "<OUT>\<BASE>_lyap.txt" "<DATA.dat>"
+lyap_k.exe -d<tau> -m3 -M3 -t<W> -n<steps> -s<min_neighbors> -o "<OUT>\<BASE>_lyap.txt" "<DATA.dat>"
 ```
 
 - Embedding fixed to **m = 3** (`M_MIN=M_MAX=3`).
-- Neighbourhood radii use **TISEAN defaults** for `-r` and `-R`; **`-n500` = 500 reference orbit points** and **`-s10` = minimum neighbourhood size / neighbour count 10** (see `lyap_k` table above).
+- **`-t<W>`** from `W_D2_<sym>`; full mode **`-n500 -s10`**, test mode reduced via `_dch_test_env.bat`.
+- Neighbourhood radii use **TISEAN defaults** for `-r` and `-R` (see `lyap_k` table above).
 - Hypothesis call uses `tau = TAU_LLE_<sym>` when Python reports LLE. The reported LLE is one slope estimate from `S(t)`, not an average over epsilon blocks; therefore the stationary-bootstrap TS test is unavailable for LLE.
 
 **Recurrence** (`RQA.bat`):
@@ -868,24 +942,19 @@ recurr.exe -m1,3 -d<tau> -r<radius> -%%2 -o "<OUT>\<BASE>_recurr.txt" "<DATA.dat
 
 `resolve_tool(name)` searches `TISEAN_BIN` env, then `C:\DCh\Tisean_3.0.0\bin\<name>.exe`, then `PATH`. Hypothesis recomputation uses this for `d2`, `lyap_k`, etc.
 
-### Optional / legacy helpers in `hypothesis.py`
+### Python TISEAN wrappers (`tisean_io.py`)
 
-Unused by current `.bat` flows but present for experiments. Official pages (TISEAN 3.0.1):
+The active pipeline shells out through **`tisean_io.py`** (imported by `invariants_*` / `hypothesis.py`), not ad-hoc calls in each script:
 
-| Program | Purpose (short) | Manual |
-|---------|-----------------|--------|
-| `c1` | fixed-mass algorithm toward **information dimension** `D₁` | [c1](https://www.pks.mpg.de/tisean/Tisean_3.0.1/docs/docs_c/c1.html) |
-| `c2d` | numerical derivative / slopes from `d2` correlation integral output | [c2d](https://www.pks.mpg.de/tisean/Tisean_3.0.1/docs/docs_c/c2d.html) |
-| `c2t` | **Takens estimator** from `.c2` | [c2t](https://www.pks.mpg.de/tisean/Tisean_3.0.1/docs/docs_c/c2t.html) |
-| `boxcount` | box occupation → **Rényi entropies** / multifractal box measures | [boxcount](https://www.pks.mpg.de/tisean/Tisean_3.0.1/docs/docs_c/boxcount.html) |
+| Wrapper | Binary | Role in this repo |
+|---------|--------|-------------------|
+| `run_d2` | `d2.exe` | Grassberger–Procaccia `.d2` / `.h2` / `.c2` (`.h2` is diagnostic only) |
+| `run_c2t` | `c2t.exe` | Takens curve from `.c2` → Takens/Ellner invariants |
+| `run_lyap_k` | `lyap_k.exe` | Kantz `S(t)` curves → LLE (with `-t<W>`) |
 
-Code notes:
+`run_c2t` uses **`cwd` + relative filenames** when calling TISEAN because FORTRAN uses **`character*72`** path buffers — long absolute paths can truncate silently.
 
-- `run_c1` / `run_c2d` — former “information dimension” plot chain (`c1` → `c2d`).
-- `run_boxcount` — `boxcount` for `K₁`-style \(q=1\) partitions when enabled.
-- `run_c2t` — short paths required: FORTRAN **`character*72`** path truncation → `hypothesis.py` uses **`cwd` + relative filenames** when shelling out to `c2t`.
-
-Removed standalone BATs (`information_dimension.bat`, `kolmogorov_entropy.bat`) are noted under [Historical/Removed Components](#historicalremoved-components).
+Removed standalone BATs (`information_dimension.bat`, `kolmogorov_entropy.bat`, `correlation_entropy.bat`) and their Python chains (`run_c1`, `run_c2d`, `run_boxcount`) are **not** in the current tree; see [Historical/Removed Components](#historicalremoved-components).
 
 **Not used in this repo** but related Lyapunov tools: [lyap_r](https://www.pks.mpg.de/tisean/Tisean_3.0.1/docs/docs_c/lyap_r.html) (Rosenstein), [lyap_spec](https://www.pks.mpg.de/tisean/Tisean_3.0.1/docs/docs_c/lyap_spec.html) (Sano–Sawada spectrum).
 
@@ -923,7 +992,7 @@ Batch runs `lyap_k.exe` with `-m3 -M3 -n500 -s10` + LLE hypothesis.
 
 Batch runs `recurr.exe`, then `rqa_values.py`, then RQA hypothesis.
 
-`rqa_values.py` reads **`TAU_RQA_<sym>`**, **`RAD_RQA_<sym>`**, and **`W_D2_<sym>`** (Theiler window, same as `hypothesis.py`) from `Tisean_3.0.0\bin\_per_coin_settings.bat` via `config_loader.parse_per_coin_settings_bat` / `rqa_params_for_symbol`. **`hypothesis.py`** receives the same **`tau`**, **`W`**, and a fallback recurrence radius via **`--delay`**, **`--theiler`**, and **`--rqa_radius`** (wired from `RQA.bat`). Embedding dimension is fixed at **m = 3** (matches `RQA.bat` `EMBED_DIM` and `hypothesis.py`). Series length follows **`DCH_TEST_MODE`**: first **2000** points in test mode, full series otherwise.
+`rqa_values.py` reads **`TAU_RQA_<sym>`**, **`RAD_RQA_<sym>`**, and **`W_D2_<sym>`** from `_per_coin_settings.bat` via `config_loader.rqa_params_for_symbol`. **`W_D2_<sym>`** is passed to PyRQA as **`theiler_corrector`** (mapped from TISEAN `W` via `tisean_theiler_min_diagonal_k`) and to **`compute_rqa_trend`** as `min_k`. **`hypothesis.py`** receives **`tau`**, **`--theiler`**, and **`--rqa_radius`** from `RQA.bat` (`--rqa_radius_mode fixed` in the batch path). Embedding dimension is **m = 3**. Series length follows **`DCH_TEST_MODE`**: first **`DCH_TEST_POINTS`** rows (default **100**) in test mode, full series otherwise.
 
 **Percentile-based recurrence threshold (default).** `RQA.bat`, `rqa_values.py`, and `hypothesis.py` no longer use the static `RAD_RQA_<sym>` directly for RQA. Instead, the active radius `r` is the **4-th percentile of pairwise Euclidean distances between embedded state vectors** (`m=3`, `tau=TAU_RQA_<sym>`) of the analysed series:
 
@@ -933,7 +1002,7 @@ Batch runs `recurr.exe`, then `rqa_values.py`, then RQA hypothesis.
 
 `RAD_RQA_<sym>` is kept as a deterministic fallback only. `RQA.bat` calls `rqa_radius.py` to compute the effective radius before `recurr.exe`, so the recurrence plot and PyRQA metrics use the same threshold. `hypothesis.py` exposes `--rqa_radius_mode {percentile,fixed}` (default `percentile`) and `--rqa_percentile <p>` (default `4.0`) to switch behavior. The active radius and its source are logged to stdout and written into `*_surrogate_summary.txt`; for `rqa_values.py` they are also recorded in `*_rqa_metrics.txt` headers.
 
-**Line of identity / MAXLINE.** PyRQA with `theiler_corrector=0` includes the main diagonal in diagonal-line statistics, which makes `MAXLINE` equal to the embedded series length. The active code therefore uses `W_metrics=max(1, W_config)` for PyRQA metrics so diagonal-line measures (`DET`, `MAXLINE`, `ENTR`) ignore the line of identity even when `_per_coin_settings.bat` contains `W_D2_<sym>=0`. `RR` is still PyRQA's recurrence-rate output. `TREND` is computed in this repo from off-identity diagonal recurrence densities: for each diagonal distance `k >= W_metrics`, compute recurrence density on the pair of diagonals `+k/-k`, then take the linear slope of that density as a function of `k`.
+**Line of identity / MAXLINE.** PyRQA's `theiler_corrector` uses `W_D2_<sym>`, which equals the embedding delay τ (`W := τ` after `theilers_w.bat`); the same integer is passed as `min_k` to `compute_rqa_trend`. `RR` is PyRQA's recurrence-rate output. `TREND` is computed from diagonal recurrence densities for `k >= max(1, W)` (pair of diagonals `+k/-k`), then a weighted linear slope of density versus `k`.
 
 ### `print_results.py`
 
@@ -943,15 +1012,33 @@ Parsing and aggregates for console logs and surrogate summaries.
 
 ## Desktop GUI
 
-`desktop_app.py` provides a native runner for users who do not want manual CLI orchestration.
+`desktop_app.py` is a **PySide6** runner for the full research chain (11 steps), aligned with the CLI workflow above.
 
-Features:
+### Pipeline steps (Run full / Run selected)
 
-- run full chain or selected step,
-- real-time log streaming,
-- stop/cancel control,
-- artifact browsing and text/image preview,
-- mode forwarding via `DCH_TEST_MODE`.
+| # | Step | Command |
+|---|------|---------|
+| 1 | crypto_data_all | `crypto_data_all.py` |
+| 2 | logreturns | `compute_logreturns.py` |
+| 3 | liquidity | `liquidity.py` |
+| 4 | mutual | `mutual.py` |
+| 5 | tau_w | `tau_w.py` |
+| 6 | theilers_w | `theilers_w.bat` |
+| 7 | phase_2D | `phase_2D.py` |
+| 8 | phase_3D | `phase_3D.py` |
+| 9 | cao_ | `cao_.py` |
+| 10 | 2dc | `2dc.py` |
+| 11 | hypothesis | `hypothesis.bat` |
+
+### UI features
+
+- **Step status** in the sidebar: pending / running / ok / fail (colour-coded).
+- **Progress bar** (top-right) with idle / running / success / error states.
+- **Logs:** monospace stream, timestamps, stderr colouring, **Follow tail**, **Clear log**.
+- **TEST_MODE** checkbox → sets `DCH_TEST_MODE` for child processes.
+- **Settings panel:** `DCH_RUN_HYPOTHESIS`, `DCH_DIMENSION_METRICS`, bootstrap **B** → `DCH_BOOTSTRAP_SAMPLES`.
+- **Artifacts tab:** tree grouped by folder; presets (STP/ACF, Lyapunov, RQA, …); auto-refresh and jump to newest PNG after plot-producing steps.
+- **Preview tab:** large image/text viewer, path bar, **Fit / 100% / +/-** zoom.
 
 Run:
 
@@ -966,9 +1053,7 @@ cd /d C:\DCh
 build_desktop_app.bat
 ```
 
-Expected binary:
-
-- `C:\DCh\dist\DChPipelineApp.exe`
+Expected binary: `C:\DCh\dist\DChPipelineApp.exe`
 
 ---
 
@@ -995,15 +1080,20 @@ py -3 <script.py>
 
 ### Result file appears missing
 
-- verify correct mode folder (`*_test_2000` vs `*_full`),
-- verify per-script output subfolder (`hypothesis_d2` vs `hypothesis_k2`, etc.),
+- verify correct mode folder (`*_test_100` or `*_test_<N>` vs `*_full`),
+- verify per-script output subfolder (`hypothesis_d2`, `hypothesis_lle`, `hypothesis_rqa`),
 - verify naming now expects `_surrogate_summary.txt`.
 
 ### Slow runs
 
-- use `TEST_MODE=true` for smoke tests,
+- use `DCH_TEST_MODE=true` (default **100** points via `_dch_test_env.bat`) for smoke tests,
 - restrict symbols during debugging,
 - run full mode only for final reporting.
+
+### Empty LLE / lyap_k plots at N=100
+
+- Kantz output may be header-only when the series is too short for `tau`, `W`, and `m=3`; summaries show `insufficient data` instead of crashing.
+- For LLE smoke tests, use a longer cut (e.g. 250+ points) or full `liquidity` window.
 
 ### Single-file manual hypothesis command
 
@@ -1016,10 +1106,12 @@ py -3 C:\DCh\hypothesis.py ^
   --output_dir C:\DCh\data\results\correlation_dimension_full\BTCUSD_run2_tau2_W0\hypothesis_d2 ^
   --test_mode false ^
   --metrics_list ELLNER ^
-  --alpha 0.01
+  --ts_threshold 3 ^
+  --bootstrap_samples 100 ^
+  --seed 0
 ```
 
-(`--alpha` defaults to `0.01` if omitted; use e.g. `0.05` for the 5% convention. Omit `--metrics_list` or use `ELLNER` for the current default dimension hypothesis; use `TAKENS` or `TAKENS,ELLNER` when you want the alternative scopes.)
+(`--ts_threshold` defaults to **3**; reject `H0` when `|TS|` exceeds it. `--bootstrap_samples` defaults to **100** or `DCH_BOOTSTRAP_SAMPLES`. Omit `--metrics_list` for `ELLNER`; use `TAKENS` or `TAKENS,ELLNER` for alternative dimension scopes. Entry point is `hypothesis.py`; implementation lives in `hypothesis_cli.py` and the `invariants_*` modules.)
 
 ---
 

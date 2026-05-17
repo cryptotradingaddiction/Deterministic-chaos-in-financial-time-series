@@ -1,5 +1,6 @@
 @echo off
 setlocal enabledelayedexpansion
+call "%~dp0_dch_test_env.bat"
 
 REM ============================================================================
 REM CORRELATION DIMENSION PIPELINE (Takens/Ellner, all files)
@@ -36,11 +37,11 @@ REM ----------------------------------------------------------------------------
 cd /d "%DATA_DIR%" || (echo ERROR: Cannot enter %DATA_DIR% & exit /b 1)
 
 if /i "%TEST_MODE%"=="true" (
-    set OUT_ROOT=%RESULTS_DIR%\correlation_dimension_test_2000
-    set TMP_ROOT=%DATA_DIR%\results_test_2000
-    set TEST_SUFFIX=_test2000
-    set PLOT_SUFFIX= test2000
-    echo [INFO] TEST MODE - first 2000 lines per file
+    set OUT_ROOT=%RESULTS_DIR%\correlation_dimension_test_%TEST_POINT_COUNT%
+    set TMP_ROOT=%DATA_DIR%\results_test_%TEST_POINT_COUNT%
+    set TEST_SUFFIX=_test%TEST_POINT_COUNT%
+    set PLOT_SUFFIX= test%TEST_POINT_COUNT%
+    echo [INFO] TEST MODE - first %TEST_POINT_COUNT% lines per file
 ) else (
     set OUT_ROOT=%RESULTS_DIR%\correlation_dimension_full
     set TMP_ROOT=%DATA_DIR%\results_full
@@ -91,7 +92,7 @@ for %%F in (%FILES%) do (
 
     if /i "%TEST_MODE%"=="true" (
         set "DATA_FILE=%TMP_ROOT%\tmp_!BASE!%TEST_SUFFIX%.dat"
-        powershell -NoProfile -Command "Get-Content -Path '!FULL_DATA!' -TotalCount 2000 | Set-Content -Path '!DATA_FILE!' -Encoding ascii"
+        powershell -NoProfile -Command "Get-Content -Path '!FULL_DATA!' -TotalCount %TEST_POINT_COUNT% | Set-Content -Path '!DATA_FILE!' -Encoding ascii"
     ) else (
         REM Use absolute path so subroutines can pushd into OUT_DIR safely.
         set "DATA_FILE=%DATA_DIR%\!FULL_DATA!"
@@ -127,7 +128,7 @@ for %%F in (%FILES%) do (
 )
 
 if /i "%TEST_MODE%"=="true" (
-    del /q "%TMP_ROOT%\tmp_*_test2000.dat" >nul 2>&1
+    del /q "%TMP_ROOT%\tmp_*_test%TEST_POINT_COUNT%.dat" >nul 2>&1
 )
 
 echo(

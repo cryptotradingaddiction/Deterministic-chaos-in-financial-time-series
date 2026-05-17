@@ -1,8 +1,45 @@
+#!/usr/bin/env python3
+"""
+Batch RQA scalar extraction for all Bitstamp log-return series (PyRQA).
+
+**Purpose**
+
+Standalone companion to ``RQA.bat``: for each coin, load the active analysis
+series (liquidity cut when present), compute recurrence quantification metrics
+with **PyRQA**, and write ``<symbol>_rqa_metrics.txt`` under
+``results/rqa_full`` or ``results/rqa_test_<N>``.
+
+**Parameters (per coin)**
+
+Read from ``Tisean_3.0.0/bin/_per_coin_settings.bat`` via :func:`config_loader.rqa_params_for_symbol`:
+
+- ``TAU_RQA_<sym>`` — embedding delay (same τ as ``recurr.exe -d``).
+- ``RAD_RQA_<sym>`` — **fallback** radius only; active radius is usually the
+  **4th percentile** of embedded pairwise distances (aligned with ``rqa_radius.py``).
+- ``W_D2_<sym>`` — Theiler window from ``theilers_w.bat``; passed to PyRQA as
+  ``theiler_corrector`` after :func:`hypothesis.tisean_theiler_min_diagonal_k`.
+
+**Metrics written**
+
+``RR``, ``DET``, ``LAM``, ``MAXLINE``, ``ENTR``, ``TT``, plus custom ``TREND``
+(diagonal-density slope vs lag, :func:`hypothesis.compute_rqa_trend`).
+
+**Test mode**
+
+When ``DCH_TEST_MODE`` is set, only the first ``DCH_TEST_POINTS`` rows are used
+(same trim as ``RQA.bat`` / ``hypothesis.py --test_mode``).
+"""
+
+from __future__ import annotations
+
 import os
 
 import numpy as np
 
 from config_loader import (
+    dch_test_mode_from_env,
+    dch_test_point_count,
+    dch_test_results_tag,
     default_per_coin_settings_bat_path,
     ensure_dir,
     get_data_dir,
@@ -17,8 +54,8 @@ from hypothesis import (
     RQA_RADIUS_PERCENTILE_DEFAULT,
     compute_percentile_radius,
     compute_rqa_trend,
-    effective_rqa_theiler,
     format_rqa_radius,
+    tisean_theiler_min_diagonal_k,
 )
 from pyrqa.analysis_type import Classic
 from pyrqa.computation import RQAComputation
@@ -27,29 +64,57 @@ from pyrqa.neighbourhood import FixedRadius
 from pyrqa.settings import Settings
 from pyrqa.time_series import TimeSeries
 
-# Same embedding dimension as `hypothesis.compute_pyrqa_metrics` and `RQA.bat` (EMBED_DIM=3).
+# Same embedding dimension as hypothesis.compute_pyrqa_metrics and RQA.bat (EMBED_DIM=3).
 RQA_EMBEDDING_DIM = 3
 
-# Recurrence threshold = 4-th percentile of pairwise Euclidean distances between
-# embedded state vectors (`rqa_tran.pdf`). The configured per-coin value from
-# `_per_coin_settings.bat` is used only as fallback when the percentile cannot
-# be computed (e.g. degenerate input).
+# Active threshold: percentile of embedded pairwise Euclidean distances (rqa_tran.pdf).
+# RAD_RQA_<sym> in _per_coin_settings.bat is fallback when percentile fails.
 RADIUS_PERCENTILE = RQA_RADIUS_PERCENTILE_DEFAULT
 
+# Default coin list (must match FILES= in RQA.bat and other pipeline scripts).
+_DEFAULT_LOGRETURN_FILES = [
+    "BTCUSD_BITSTAMP_1h_complete_logreturns.dat",
+    "ETHUSD_BITSTAMP_1h_complete_logreturns.dat",
+    "LTCUSD_BITSTAMP_1h_complete_logreturns.dat",
+    "XRPUSD_BITSTAMP_1h_complete_logreturns.dat",
+    "LINKUSD_BITSTAMP_1h_complete_logreturns.dat",
+    "DOGEUSD_BITSTAMP_1h_complete_logreturns.dat",
+    "ADAUSD_BITSTAMP_1h_complete_logreturns.dat",
+]
 
-def main():
+
+def _load_dat_series(path: str) -> list[float]:
+    """
+    Read a TISEAN-style 1-column .dat file (or CSV-like second column).
+
+    Skips blank lines; tolerates comma-separated rows by taking the last float field.
+    """
+    data: list[float] = []
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            try:
+                data.append(float(stripped))
+            except ValueError:
+                parts = stripped.split(",")
+                if len(parts) > 1:
+                    try:
+                        data.append(float(parts[1]))
+                    except ValueError:
+                        continue
+    return data
+
+
+def main() -> None:
     config = load_config()
     data_dir = get_data_dir(config)
-    test_mode = str(os.environ.get("DCH_TEST_MODE", "false")).strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "y",
-        "on",
-    }
-    out_root_name = "rqa_test_2000" if test_mode else "rqa_full"
+    test_mode = dch_test_mode_from_env()
+    out_root_name = f"rqa_{dch_test_results_tag()}" if test_mode else "rqa_full"
     output_root = ensure_dir(os.path.join(get_results_dir(config), out_root_name))
 
+    # Per-coin tau, fallback radius, Theiler W (shared with d2 / lyap_k / hypothesis).
     bat_path = default_per_coin_settings_bat_path()
     per_coin = parse_per_coin_settings_bat(bat_path)
     if not os.path.isfile(bat_path):
@@ -58,17 +123,7 @@ def main():
     elif not per_coin:
         print(f"[WARN] No assignments parsed from {bat_path}")
 
-    files = [
-        "BTCUSD_BITSTAMP_1h_complete_logreturns.dat",
-        "ETHUSD_BITSTAMP_1h_complete_logreturns.dat",
-        "LTCUSD_BITSTAMP_1h_complete_logreturns.dat",
-        "XRPUSD_BITSTAMP_1h_complete_logreturns.dat",
-        "LINKUSD_BITSTAMP_1h_complete_logreturns.dat",
-        "DOGEUSD_BITSTAMP_1h_complete_logreturns.dat",
-        "ADAUSD_BITSTAMP_1h_complete_logreturns.dat",
-    ]
-
-    for filename in files:
+    for filename in _DEFAULT_LOGRETURN_FILES:
         input_path = prefer_liquidity_cut(os.path.join(data_dir, filename))
         symbol = filename.split("_")[0]
         tau, config_radius, theiler_w = rqa_params_for_symbol(symbol, per_coin)
@@ -77,26 +132,12 @@ def main():
             print(f"Error: The file {input_path} was not found. Skipping.")
             continue
 
-        data = []
         print(f"\nLoading data from: {input_path}")
-        with open(input_path, "r", encoding="utf-8") as f:
-            for line in f:
-                stripped = line.strip()
-                if not stripped:
-                    continue
-                try:
-                    data.append(float(stripped))
-                except ValueError:
-                    parts = stripped.split(",")
-                    if len(parts) > 1:
-                        try:
-                            data.append(float(parts[1]))
-                        except ValueError:
-                            continue
+        data = _load_dat_series(input_path)
 
-        # Align length with RQA.bat: TEST uses first 2000 points; FULL uses entire series.
+        # Match RQA.bat: test mode uses first DCH_TEST_POINTS rows only.
         if test_mode:
-            data = data[:2000]
+            data = data[: dch_test_point_count()]
 
         n_pts = len(data)
         if n_pts < 20:
@@ -104,6 +145,8 @@ def main():
             continue
 
         data_arr = np.asarray(data, dtype=float)
+
+        # Dynamic radius (preferred) vs static RAD_RQA_<sym> from .bat.
         percentile_radius = compute_percentile_radius(
             data_arr,
             delay=tau,
@@ -118,19 +161,17 @@ def main():
             radius = float(config_radius)
             radius_source = "config fallback"
 
-        theiler_eff = effective_rqa_theiler(
-            theiler_w,
-            delay=tau,
-            m=RQA_EMBEDDING_DIM,
-        )
-
+        # Map TISEAN Theiler W to PyRQA diagonal corrector (see hypothesis_config).
+        theiler_eff = max(0, int(theiler_w))
+        pyrqa_theiler = tisean_theiler_min_diagonal_k(theiler_eff)
         print(
             f"Processing {symbol}: N={n_pts}, tau={tau}, "
             f"r={radius:.6g} ({radius_source}), "
-            f"W_config={theiler_w}, W_metrics={theiler_eff}, m={RQA_EMBEDDING_DIM}; "
-            f"config radius={config_radius:g}"
+            f"W={theiler_eff} (TISEAN -t; PyRQA/TREND corrector={pyrqa_theiler}), "
+            f"m={RQA_EMBEDDING_DIM}; config radius={config_radius:g}"
         )
 
+        # Classic RQA with fixed radius neighbourhood in embedded space.
         time_series = TimeSeries(
             data_arr,
             embedding_dimension=RQA_EMBEDDING_DIM,
@@ -141,15 +182,17 @@ def main():
             analysis_type=Classic,
             neighbourhood=FixedRadius(radius),
             similarity_measure=EuclideanMetric,
-            theiler_corrector=theiler_eff,
+            theiler_corrector=pyrqa_theiler,
         )
         computation = RQAComputation.create(settings, verbose=False)
         result = computation.run()
+
+        # Custom diagonal-structure trend (not a built-in PyRQA scalar).
         trend = compute_rqa_trend(
             data_arr,
             delay=tau,
             radius=radius,
-            min_k=theiler_eff,
+            min_k=pyrqa_theiler,
             m=RQA_EMBEDDING_DIM,
         )
 
@@ -162,11 +205,11 @@ def main():
         print(f"TT       = {result.trapping_time:.6f}")
         print(f"TREND    = {trend:.6f}")
 
+        # Run folder naming matches RQA.bat / recurr output layout.
         radius_id = format_rqa_radius(radius)
         run_id = f"run2_tau{tau}_r{radius_id}"
         out_dir = os.path.join(output_root, f"{symbol}_{run_id}")
-        if not os.path.isdir(out_dir):
-            os.makedirs(out_dir, exist_ok=True)
+        os.makedirs(out_dir, exist_ok=True)
 
         out_txt = os.path.join(out_dir, f"{symbol}_rqa_metrics.txt")
         with open(out_txt, "w", encoding="utf-8") as out:
@@ -174,7 +217,7 @@ def main():
             out.write(
                 f"# PyRQA params: tau={tau}, radius={radius:.10g} ({radius_source}), "
                 f"config_radius={config_radius:g}, m={RQA_EMBEDDING_DIM}, "
-                f"Theiler_W_config={theiler_w}, Theiler_W_metrics={theiler_eff}, "
+                f"W={theiler_eff} (per-coin W_D2 from theilers_w.bat), "
                 f"percentile={RADIUS_PERCENTILE:g}%, "
                 f"settings_file=_per_coin_settings.bat\n"
             )

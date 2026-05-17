@@ -1,5 +1,6 @@
 @echo off
 setlocal enabledelayedexpansion
+call "%~dp0_dch_test_env.bat"
 
 REM ============================================================================
 REM RQA PIPELINE (recurrence + RQA metrics, all files)
@@ -36,10 +37,10 @@ REM ----------------------------------------------------------------------------
 cd /d "%DATA_DIR%" || (echo ERROR: Cannot enter %DATA_DIR% & exit /b 1)
 
 if /i "%TEST_MODE%"=="true" (
-    set OUT_ROOT=%RESULTS_DIR%\rqa_test_2000
-    set TMP_ROOT=%DATA_DIR%\results_test_2000
-    set TEST_SUFFIX=_test2000
-    echo [INFO] TEST MODE - first 2000 lines per file
+    set OUT_ROOT=%RESULTS_DIR%\rqa_test_%TEST_POINT_COUNT%
+    set TMP_ROOT=%DATA_DIR%\results_test_%TEST_POINT_COUNT%
+    set TEST_SUFFIX=_test%TEST_POINT_COUNT%
+    echo [INFO] TEST MODE - first %TEST_POINT_COUNT% lines per file
 ) else (
     set OUT_ROOT=%RESULTS_DIR%\rqa_full
     set TMP_ROOT=%DATA_DIR%\results_full
@@ -86,7 +87,7 @@ for %%F in (%FILES%) do (
 
     if /i "%TEST_MODE%"=="true" (
         set "DATA_FILE=%TMP_ROOT%\tmp_!BASE!%TEST_SUFFIX%.dat"
-        powershell -NoProfile -Command "Get-Content -Path '!FULL_DATA!' -TotalCount 2000 | Set-Content -Path '!DATA_FILE!' -Encoding ascii"
+        powershell -NoProfile -Command "Get-Content -Path '!FULL_DATA!' -TotalCount %TEST_POINT_COUNT% | Set-Content -Path '!DATA_FILE!' -Encoding ascii"
     ) else (
         REM Use absolute path so subroutines can pushd into OUT_DIR safely.
         set "DATA_FILE=%DATA_DIR%\!FULL_DATA!"
@@ -118,15 +119,15 @@ for %%F in (%FILES%) do (
     if "!COIN_RAD_EFF!"=="" set "COIN_RAD_EFF=!COIN_RAD!"
     echo   [RQA radius] effective r=!COIN_RAD_EFF! ^(4%% pairwise-distance percentile; fallback=!COIN_RAD!^)
 
-    call :RUN_RQA "!BASE!" "!DATA_FILE!" "run2_tau!COIN_TAU!_r!COIN_RAD_EFF!" !COIN_TAU! !COIN_RAD_EFF!
+    call :RUN_RQA "!BASE!" "!DATA_FILE!" "run2_tau!COIN_TAU!_r!COIN_RAD_EFF!" !COIN_TAU! !COIN_RAD_EFF! !COIN_W!
     if errorlevel 1 exit /b 1
 
     if /i "%RUN_HYPOTHESIS%"=="true" (
         set "RUN2_DIR=%OUT_ROOT%\!BASE!_run2_tau!COIN_TAU!_r!COIN_RAD_EFF!"
         set "HYP_DIR=!RUN2_DIR!\hypothesis_rqa"
         if not exist "!HYP_DIR!" mkdir "!HYP_DIR!"
-        echo   [Hypothesis] RQA scalar summary ^(no bootstrap TS; tau=!COIN_TAU!, r=!COIN_RAD_EFF!, W=!COIN_W!^)
-        "%PYTHON_EXE%" %PYTHON_ARGS% "C:\DCh\hypothesis.py" --input "!DATA_FILE!" --base "!BASE!" --delay !COIN_TAU! --theiler !COIN_W! --rqa_radius !COIN_RAD_EFF! --output_dir "!HYP_DIR!" --test_mode "%TEST_MODE%" --metrics_list "RR,DET,LAM,MAXLINE,ENTR,TT,TREND"
+        echo   [Hypothesis] RQA bootstrap TS test ^(tau=!COIN_TAU!, r=!COIN_RAD_EFF! fixed from rqa_radius.py, W=!COIN_W!^)
+        "%PYTHON_EXE%" %PYTHON_ARGS% "C:\DCh\hypothesis.py" --input "!DATA_FILE!" --base "!BASE!" --delay !COIN_TAU! --theiler !COIN_W! --rqa_radius !COIN_RAD_EFF! --rqa_radius_mode fixed --output_dir "!HYP_DIR!" --test_mode "%TEST_MODE%" --metrics_list "RR,DET,LAM,MAXLINE,ENTR,TT,TREND"
         if errorlevel 1 exit /b 1
         "%PYTHON_EXE%" %PYTHON_ARGS% "%PRINT_RESULTS%" boot "!HYP_DIR!\!BASE!_surrogate_summary.txt"
     ) else (
@@ -182,7 +183,7 @@ for %%F in (%FILES%) do (
 )
 
 if /i "%TEST_MODE%"=="true" (
-    del /q "%TMP_ROOT%\tmp_*_test2000.dat" >nul 2>&1
+    del /q "%TMP_ROOT%\tmp_*_test%TEST_POINT_COUNT%.dat" >nul 2>&1
 )
 
 echo(
@@ -203,7 +204,7 @@ exit /b 0
 
 
 REM ============================================================================
-REM :RUN_RQA <BASE> <DATA_FILE> <RUN_ID> <TAU> <RADIUS>
+REM :RUN_RQA <BASE> <DATA_FILE> <RUN_ID> <TAU> <RADIUS> <W>
 REM ============================================================================
 :RUN_RQA
 set "BASE=%~1"
@@ -211,18 +212,20 @@ set "DATA_FILE=%~2"
 set "RUN_ID=%~3"
 set "TAU_DELAY=%~4"
 set "RADIUS=%~5"
+set "THEILER_W=%~6"
+if "!THEILER_W!"=="" set "THEILER_W=0"
 set "OUT_DIR=%OUT_ROOT%\!BASE!_!RUN_ID!"
 if not exist "!OUT_DIR!" mkdir "!OUT_DIR!"
 
 echo(
 echo   --------------------------------------------------
-echo   Running RQA analysis: !RUN_ID! (tau=!TAU_DELAY!, r=!RADIUS!)
+echo   Running RQA analysis: !RUN_ID! (tau=!TAU_DELAY!, r=!RADIUS!, W=!THEILER_W!)
 echo   Data file : !DATA_FILE!
 echo   Output dir: !OUT_DIR!
 echo   --------------------------------------------------
 
-echo   [1/2] recurr: recurrence matrix for plot diagnostics...
-"%TISEAN%\recurr.exe" -m%COMPONENTS%,%EMBED_DIM% -d!TAU_DELAY! -r!RADIUS! -%%2 -o "!OUT_DIR!\!BASE!_recurr.txt" "!DATA_FILE!"
+echo   [1/2] recurr: recurrence matrix for plot diagnostics ^(-t!THEILER_W!^)...
+"%TISEAN%\recurr.exe" -m%COMPONENTS%,%EMBED_DIM% -d!TAU_DELAY! -t!THEILER_W! -r!RADIUS! -%%2 -o "!OUT_DIR!\!BASE!_recurr.txt" "!DATA_FILE!"
 if errorlevel 1 exit /b 1
 "%PYTHON_EXE%" %PYTHON_ARGS% "%PRINT_RESULTS%" rec "!OUT_DIR!\!BASE!_recurr.txt"
 
@@ -230,7 +233,7 @@ if errorlevel 1 exit /b 1
 
 echo   [2/2] plot: recurrence matrix diagnostics...
 if /i "%HAS_GNUPLOT%"=="true" (
-    "%GNUPLOT_EXE%" -e "set terminal pngcairo size 1200,1200 enhanced; set output '!OUT_DIR!\!BASE!_recurrence.png'; unset key; set title '!BASE! Recurrence Plot ^(tau=!TAU_DELAY!, r=!RADIUS!, m=%EMBED_DIM%^) %TEST_SUFFIX%'; set xlabel 'Time index'; set ylabel 'Time index'; plot '!OUT_DIR!\!BASE!_recurr.txt' with dots lc rgb 'black'" > "!OUT_DIR!\gnuplot.log" 2>&1
+    "%GNUPLOT_EXE%" -e "set terminal pngcairo size 1200,1200 enhanced; set output '!OUT_DIR!\!BASE!_recurrence.png'; unset key; set title '!BASE! Recurrence Plot ^(tau=!TAU_DELAY!, r=!RADIUS!, W=!THEILER_W!, m=%EMBED_DIM%^) %TEST_SUFFIX%'; set xlabel 'Time index'; set ylabel 'Time index'; plot '!OUT_DIR!\!BASE!_recurr.txt' with dots lc rgb 'black'" > "!OUT_DIR!\gnuplot.log" 2>&1
     "%PYTHON_EXE%" %PYTHON_ARGS% "%PRINT_RESULTS%" file "!OUT_DIR!\!BASE!_recurrence.png"
 )
 echo(

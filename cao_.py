@@ -16,7 +16,14 @@ import time
 import logging
 import multiprocessing as mp
 from functools import partial
-from config_loader import load_config, get_data_dir, get_results_dir, ensure_dir, prefer_liquidity_cut
+from config_loader import (
+    load_config,
+    get_data_dir,
+    get_results_dir,
+    ensure_dir,
+    prefer_liquidity_cut,
+    tau_for_symbol_from_mutual,
+)
 from report_helper import Reporter, append_summary_row
 
 SUMMARY_FILE = "_cao_summary.txt"
@@ -217,23 +224,25 @@ def cao_method_parallel(data, tau, d_max, num_processes=None):
 # MAIN SCRIPT (EXECUTION)
 # ------------------------------------------------------------------------------
 if __name__ == "__main__":
-    
+
     # =========================================================================
-    # SETTINGS FOR FILES AND THEIR INDIVIDUAL DELAYS (TAU)
-    # Here we define the exact filename and delay for each cryptocurrency.
-    # We changed a simple list into a list of dictionaries.
+    # SETTINGS: τ from mutual-information first minimum (``mutual/_mi_summary.txt``).
     # =========================================================================
+    config = load_config()
+    CAO_FILES = [
+        "BTCUSD_BITSTAMP_1h_complete_logreturns.dat",
+        "ETHUSD_BITSTAMP_1h_complete_logreturns.dat",
+        "LTCUSD_BITSTAMP_1h_complete_logreturns.dat",
+        "XRPUSD_BITSTAMP_1h_complete_logreturns.dat",
+        "LINKUSD_BITSTAMP_1h_complete_logreturns.dat",
+        "DOGEUSD_BITSTAMP_1h_complete_logreturns.dat",
+        "ADAUSD_BITSTAMP_1h_complete_logreturns.dat",
+    ]
     file_settings = [
-        {"file": "BTCUSD_BITSTAMP_1h_complete_logreturns.dat", "tau": 2},
-        {"file": "ETHUSD_BITSTAMP_1h_complete_logreturns.dat", "tau": 2},
-        {"file": "LTCUSD_BITSTAMP_1h_complete_logreturns.dat", "tau": 4},
-        {"file": "XRPUSD_BITSTAMP_1h_complete_logreturns.dat", "tau": 3},
-        {"file": "LINKUSD_BITSTAMP_1h_complete_logreturns.dat", "tau": 4},
-        {"file": "DOGEUSD_BITSTAMP_1h_complete_logreturns.dat", "tau": 3},
-        {"file": "ADAUSD_BITSTAMP_1h_complete_logreturns.dat", "tau": 2}
+        {"file": fn, "tau": tau_for_symbol_from_mutual(fn.split("_")[0], config)}
+        for fn in CAO_FILES
     ]
 
-    config = load_config()
     data_dir = get_data_dir(config)
     output_dir = ensure_dir(os.path.join(get_results_dir(config), "cao"))
 
@@ -342,13 +351,17 @@ if __name__ == "__main__":
         e2_avg = float(np.mean(e2_finite)) if e2_finite.size else float("nan")
         # Cao's noise diagnostic: E2 ~ 1 for all m means stochastic noise,
         # E2 deviating from 1 implies determinism.
+        # Evaluate Cao's noise diagnostic rule set based on E2 properties:
         if not e2_finite.size:
-            verdict = "no E2 data"
+            verdict = "no E2 data" # Edge case: No valid E2 data was successfully calculated
         elif np.all(np.abs(e2_finite - 1.0) < 0.05):
+            # If every single E2 value remains tightly hugging 1.0 (within 5%), it implies randomness
             verdict = "E2~1 -> stochastic / noise-like"
         else:
+            # If E2 fluctuates away from 1.0, it suggests deterministic structural properties
             verdict = "E2 deviates from 1 -> deterministic"
 
+        # Initialize the custom reporter object to construct a formatted text readout
         rep = Reporter()
         rep.add("=" * 80)
         rep.add(f"Cao's method results - {coin_name} (tau={tau}, d_max={d_max})")
@@ -356,11 +369,17 @@ if __name__ == "__main__":
         rep.add(f"Series len : {len(data)}")
         rep.add(f"Total time : {total_time:.2f} s")
         rep.add("=" * 80)
-        rep.add(f"{'m':>3} {'E1(m)':>12} {'E2(m)':>12}")
+        rep.add(f"{'m':>3} {'E1(m)':>12} {'E2(m)':>12}") # Header for individual data points
         rep.add("-" * 32)
+        
+        # Zip pairs E1 and E2 sequentially, numbering them starting from m=1
         for i, (e1v, e2v) in enumerate(zip(E1_arr, E2_arr), start=1):
+            # Write floats formatted to 6 decimal places aligned to the right
             rep.add(f"{i:>3d} {e1v:>12.6f} {e2v:>12.6f}")
+            
         rep.add("-" * 32)
+        
+        # Document the automated conclusion regarding the optimal embedding dimension
         if m_optimal is not None:
             rep.add(
                 f"Optimal m* : {m_optimal} "
@@ -368,14 +387,19 @@ if __name__ == "__main__":
             )
         else:
             rep.add("Optimal m* : not found within d_max")
+            
+        # Document the diagnostic results
         rep.add(f"Mean E2    : {e2_avg:.6f}")
         rep.add(f"Verdict    : {verdict}")
         rep.add(f"Plot       : {out_img}")
+        
+        # Write the comprehensive report payload into an individual text file
         out_txt = rep.write(
             output_dir, filename.replace(".dat", f"_tau{tau}_cao_results.txt")
         )
         logger.info(f"Saved text report: {out_txt}")
 
+        # Extract values at m_optimal for concise summary logging, with safety checks against out-of-bounds indices
         if m_optimal is not None:
             e1_at = float(E1_arr[m_optimal - 1])
             e1_next = (
@@ -384,16 +408,22 @@ if __name__ == "__main__":
         else:
             e1_at = float("nan")
             e1_next = float("nan")
+            
         m_opt_str = f"{m_optimal}" if m_optimal is not None else "-"
+        
+        # Format a highly condensed single-line summary representing this asset
         summary_row = (
             f"{coin_name:<10} {tau:>4d} {m_opt_str:>10} {e1_at:>10.4f} "
             f"{e1_next:>12.4f} {e2_avg:>10.4f} {verdict:<28}"
         )
+        
+        # Append the specific line to the cumulative summary tracking file
         summary_path = append_summary_row(
             output_dir, SUMMARY_FILE, SUMMARY_HEADER, summary_row
         )
         logger.info(f"Appended row to summary: {summary_path}")
 
+    # Final wrap-up printout once the entire CAO_FILES loop finishes
     print("\n" + "="*80)
     logger.info("ALL FILES SUCCESSFULLY PROCESSED AND GRAPHS SAVED!")
     print("="*80)

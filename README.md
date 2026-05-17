@@ -56,6 +56,9 @@ Main tested invariants:
 The hypothesis part is distributed across per-invariant batch scripts and consolidated with a wrapper entry point.
 
 ---
+&nbsp;
+&nbsp;
+&nbsp;
 
 ## Current Architecture (Important)
 
@@ -75,6 +78,9 @@ The hypothesis part is distributed across per-invariant batch scripts and consol
 - Decision rule: compare that bootstrap centre with one fully reshuffled invariant via `TS=(mean_boot-reshuffle)/SD_boot`; reject `H0` if `|TS| > 3`. RQA uses the same rule when `--rqa_bootstrap on` (default); the recurrence radius is **locked from the original series** so every bootstrap and reference run shares the same `r`.
 
 ---
+&nbsp;
+&nbsp;
+&nbsp;
 
 ## Quick Start
 
@@ -85,6 +91,7 @@ Use **Python 3.10+** (3.12 is a common choice on Windows). The dependency list i
 ```bat
 py -3 -m pip install -r requirements
 ```
+&nbsp;
 
 ### 2) Ensure external tools are installed
 
@@ -110,6 +117,8 @@ Optional environment overrides (no code changes):
 | `DCH_BOOTSTRAP_SAMPLES` | Default for `hypothesis.py --bootstrap_samples` when the CLI flag is omitted (desktop sets this from the GUI spinbox). |
 | `DCH_LYAP_STEPS` | `lyap_k -n` in test mode (default **40** when `DCH_TEST_MODE=true`). |
 | `DCH_LYAP_MIN_NEIGHBORS` | `lyap_k -s` and LLE block filter in test mode (default **3** when `DCH_TEST_MODE=true`). |
+
+&nbsp;
 
 ### 3) Prepare config
 
@@ -140,6 +149,8 @@ Notes:
 - if `download.to` is `null`, downloader uses current UTC date.
 - `liquidity` controls how `liquidity.py` builds `*_logreturns_cut.*` (see `config.example.yaml` for full comments). **Fixed** mode keeps the last **`fixed_tail_points`** hourly samples (no calendar from/to).
 
+&nbsp;
+
 ### 4) Smoke test (optional)
 
 **Fast TISEAN + hypothesis** (first **100** points per series):
@@ -162,6 +173,9 @@ py -3 test_hypothesis_stack.py
 Note: **LLE** at N≈100 often returns `insufficient data` with production `tau`/`W`; use full mode or longer cuts for meaningful Lyapunov estimates.
 
 ---
+&nbsp;
+&nbsp;
+&nbsp;
 
 ## Windows CMD primer (batch files)
 

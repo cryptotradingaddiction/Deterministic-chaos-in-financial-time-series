@@ -98,8 +98,11 @@ def lyap_k_iterations() -> int:
 def lyap_min_neighbors() -> int:
     """Minimum neighbours for LLE block filter (env ``DCH_LYAP_MIN_NEIGHBORS``).
 
-    Applied in Python (``invariants_lyapunov.extract_lle_ols``) after parsing
-    lyap_k output. **Not** a lyap_k CLI flag.
+    Applied in Python (``invariants_lyapunov.find_best_lle_block`` /
+    ``extract_lle_ols``) after parsing lyap_k output. **Not** a lyap_k CLI flag.
+
+    Defaults: ``MIN_LYAP_NEIGHBORS`` (10) in production, 3 in
+    ``DCH_TEST_MODE=true`` — short series rarely satisfy the 10-neighbour rule.
     """
     raw = os.environ.get("DCH_LYAP_MIN_NEIGHBORS", "").strip()
     if raw:
@@ -107,7 +110,11 @@ def lyap_min_neighbors() -> int:
             return max(1, int(float(raw)))
         except ValueError:
             pass
-    return MIN_LYAP_NEIGHBORS
+    return (
+        DEFAULT_DCH_LYAP_MIN_NEIGHBORS_TEST
+        if _is_test_mode_env()
+        else MIN_LYAP_NEIGHBORS
+    )
 
 
 DEFAULT_RQA_RADIUS = 0.005

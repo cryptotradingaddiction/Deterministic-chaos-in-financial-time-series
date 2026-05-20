@@ -862,12 +862,16 @@ class PipelineApp(QMainWindow):
         env.insert("DCH_TEST_MODE", "true" if test_on else "false")
         if test_on:
             from hypothesis_config import (
+                DEFAULT_DCH_LYAP_ITERATIONS_TEST,
                 DEFAULT_DCH_LYAP_MIN_NEIGHBORS_TEST,
                 DEFAULT_DCH_LYAP_STEPS_TEST,
             )
 
             env.insert("DCH_TEST_POINTS", str(dch_test_point_count()))
             env.insert("DCH_LYAP_STEPS", str(DEFAULT_DCH_LYAP_STEPS_TEST))
+            env.insert(
+                "DCH_LYAP_ITERATIONS", str(DEFAULT_DCH_LYAP_ITERATIONS_TEST)
+            )
             env.insert(
                 "DCH_LYAP_MIN_NEIGHBORS", str(DEFAULT_DCH_LYAP_MIN_NEIGHBORS_TEST)
             )

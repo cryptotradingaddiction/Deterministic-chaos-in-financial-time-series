@@ -346,7 +346,9 @@ def cmd_takens_value(path, _n=None):
 
     Detects the plateau on the m=3 d_2^(T)(r') curve, then evaluates the Ellner
     estimate on the sibling .c2 file over the auto-detected [r_min, r_max].
-    Falls back to NaN when either step is undefined.
+    Returns NaN in the Ellner column when the integral cannot be evaluated;
+    do **not** substitute the Takens plateau mean — the CSV column is
+    ``ellner_m3`` (see ``correlation_dimension.bat`` aggregate header).
     """
     blocks = read_blocks(path)
     value = float("nan")
@@ -361,8 +363,6 @@ def cmd_takens_value(path, _n=None):
         ellner = _ellner_from_c2(c2_path, r_min, r_max, dim=3)
         if np.isfinite(ellner):
             value = ellner
-        elif vals.size:
-            value = float(np.mean(vals))
     print(f"{os.path.basename(path)},{value:.10g},{points},{r_min:.10g},{r_max:.10g}")
 
 
@@ -398,7 +398,7 @@ def cmd_lyap(path, _n=None):
     if not by_dim:
         print("  [WARN] No lyap blocks parsed")
         return
-    print("  Diagnostic lyap_k slopes (first epsilon block per m; hypothesis LLE uses median over blocks):")
+    print("  Diagnostic lyap_k slopes (first epsilon block per m; hypothesis LLE uses OLS slope of the highest-quality block via extract_lle_ols):")
     print(f"  {'m':>4}  {'lambda':>10}  {'pts':>5}")
     lambdas = []
     for m in sorted(by_dim.keys()):

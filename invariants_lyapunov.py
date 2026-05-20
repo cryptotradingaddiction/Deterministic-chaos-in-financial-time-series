@@ -39,6 +39,8 @@ def _best_linear_slope_window(x, y, min_points=MIN_LYAP_LINEAR_POINTS):
     if n < min_points:
         return (np.nan, np.nan, np.nan, np.nan, np.nan)
 
+    # Threshold on |Pearson r|, not on R^2. A value of 0.99 means "strongly
+    # linear"; |r|^2 = 0.9801. Name kept for backward grep-ability.
     R2_THRESHOLD = 0.99
     win_thresh = None  # (start, width, slope, intercept)
     best_len_thresh = 0
@@ -179,6 +181,87 @@ def _parse_lyap_blocks(lyap_file, dim=M_LYAP):
     return blocks
 
 
+def _fit_lle_block(blk):
+    """Return scored candidate tuple for one parsed lyap_k block, or None.
+
+    Tuple layout: ``(quality, slope, std_err, eps, t_lo, t_hi, intercept,
+    n_neighbors)``. Ordering by descending quality picks the longest linear
+    window with the smallest OLS slope error.
+    """
+    data = blk["data"]
+    if data.shape[0] < 3:
+        return None
+    slope, t_lo, t_hi, intercept, std_err = _best_linear_slope_window(
+        data[:, 0], data[:, 1]
+    )
+    if not (np.isfinite(slope) and np.isfinite(std_err) and std_err > 0.0):
+        return None
+    if not (np.isfinite(t_lo) and np.isfinite(t_hi) and t_hi > t_lo):
+        return None
+    quality = (t_hi - t_lo) / std_err
+    return (
+        float(quality),
+        float(slope),
+        float(std_err),
+        float(blk["eps"]),
+        float(t_lo),
+        float(t_hi),
+        float(intercept),
+        int(blk["n_neighbors"]),
+    )
+
+
+def find_best_lle_block(lyap_file, min_neighbors=None, dim=None):
+    """Return the highest-quality lyap_k block and its candidate list.
+
+    The selection rule matches :func:`extract_lle_ols`. Returned ``best`` is
+    ``None`` when no block produces a finite (slope, std_err > 0) fit.
+
+    Returns
+    -------
+    (best, candidates)
+        ``best`` is the winning candidate tuple from :func:`_fit_lle_block`
+        (or ``None``); ``candidates`` is the full sorted list (best-first).
+    """
+    if min_neighbors is None:
+        min_neighbors = lyap_min_neighbors()
+    if dim is None:
+        dim = M_LYAP
+
+    blocks = _parse_lyap_blocks(lyap_file, dim=dim)
+    if not blocks:
+        return None, []
+
+    candidates = []
+    for blk in blocks:
+        if blk["n_neighbors"] < min_neighbors:
+            logger.debug(
+                "lyap block eps=%.6g skipped: n_neighbors=%d < %d",
+                blk["eps"], blk["n_neighbors"], min_neighbors,
+            )
+            continue
+        fitted = _fit_lle_block(blk)
+        if fitted is not None:
+            candidates.append(fitted)
+
+    if not candidates:
+        logger.warning(
+            "find_best_lle_block: no block passed n_neighbors>=%d in %s; "
+            "relaxing neighbour filter.",
+            min_neighbors, lyap_file,
+        )
+        for blk in blocks:
+            fitted = _fit_lle_block(blk)
+            if fitted is not None:
+                candidates.append(fitted)
+
+    if not candidates:
+        return None, []
+
+    candidates.sort(reverse=True)  # descending quality
+    return candidates[0], candidates
+
+
 def extract_lle_ols(lyap_file, min_neighbors=None, dim=None):
     """LLE = OLS slope of the highest-quality epsilon block at the chosen *m*.
 
@@ -202,62 +285,15 @@ def extract_lle_ols(lyap_file, min_neighbors=None, dim=None):
         block produces a finite (slope, std_err) pair.
 
     The median and spread of slopes across all usable blocks are also logged
-    at INFO level as a robustness check.
+    at INFO level as a robustness check (not the primary uncertainty).
     """
-    if min_neighbors is None:
-        min_neighbors = lyap_min_neighbors()
-    if dim is None:
-        dim = M_LYAP
-
-    blocks = _parse_lyap_blocks(lyap_file, dim=dim)
-    if not blocks:
+    best, candidates = find_best_lle_block(
+        lyap_file, min_neighbors=min_neighbors, dim=dim,
+    )
+    if best is None:
         return np.nan, np.nan, 0
 
-    def _fit_block(blk):
-        data = blk["data"]
-        if data.shape[0] < 3:
-            return None
-        slope, t_lo, t_hi, _b, std_err = _best_linear_slope_window(
-            data[:, 0], data[:, 1]
-        )
-        if not (np.isfinite(slope) and np.isfinite(std_err) and std_err > 0.0):
-            return None
-        if not (np.isfinite(t_lo) and np.isfinite(t_hi) and t_hi > t_lo):
-            return None
-        quality = (t_hi - t_lo) / std_err
-        return (quality, float(slope), float(std_err), float(blk["eps"]),
-                float(t_lo), float(t_hi))
-
-    candidates = []
-    for blk in blocks:
-        if blk["n_neighbors"] < min_neighbors:
-            logger.debug(
-                "lyap block eps=%.6g skipped: n_neighbors=%d < %d",
-                blk["eps"], blk["n_neighbors"], min_neighbors,
-            )
-            continue
-        fitted = _fit_block(blk)
-        if fitted is not None:
-            candidates.append(fitted)
-
-    # Fallback: relax neighbor filter only if no block survives it.
-    if not candidates:
-        logger.warning(
-            "extract_lle_ols: no block passed n_neighbors>=%d in %s; "
-            "relaxing neighbour filter.",
-            min_neighbors, lyap_file,
-        )
-        for blk in blocks:
-            fitted = _fit_block(blk)
-            if fitted is not None:
-                candidates.append(fitted)
-
-    if not candidates:
-        return np.nan, np.nan, 0
-
-    candidates.sort(reverse=True)  # by quality desc
-    best_quality, best_slope, best_std_err, best_eps, best_t_lo, best_t_hi = candidates[0]
-
+    best_quality, best_slope, best_std_err, best_eps, best_t_lo, best_t_hi, _b, _nn = best
     all_slopes = np.array([c[1] for c in candidates], dtype=float)
     median_slope = float(np.median(all_slopes))
     spread = float(np.std(all_slopes, ddof=1)) if all_slopes.size > 1 else 0.0
@@ -276,9 +312,10 @@ def extract_lle_ols(lyap_file, min_neighbors=None, dim=None):
 def extract_lle_mean_std(lyap_file, min_neighbors=None):
     """Backward-compatible alias for :func:`extract_lle_ols`.
 
-    Note: the second return value is now the **OLS standard error of the
-    selected block's slope**, not the spread across blocks. The signature
-    ``(value, sd, n)`` is unchanged so callers in
-    :mod:`invariants_compute` and :mod:`plot_lyap_k_output` still work.
+    .. note::
+        Despite the legacy name, the second return value is now the **OLS
+        standard error of the selected block's slope** (Hegger-Kantz-Schreiber
+        primary uncertainty), not the spread across blocks. Prefer the new
+        name :func:`extract_lle_ols` in new code.
     """
     return extract_lle_ols(lyap_file, min_neighbors=min_neighbors)

@@ -110,7 +110,15 @@ def main():
     parser.add_argument("--delay", type=int, required=True)
     parser.add_argument("--theiler", type=int, required=True)
     parser.add_argument("--output_dir", required=True)
-    parser.add_argument("--test_mode", default="false")
+    parser.add_argument(
+        "--test_mode",
+        default="false",
+        help=(
+            "When 'true', sets ``DCH_TEST_MODE`` in this process so downstream "
+            "TISEAN wrappers (run_lyap_k, lyap_k_iterations, lyap_min_neighbors) "
+            "pick the short-series defaults. Equivalent to setting the env var."
+        ),
+    )
     parser.add_argument("--metrics", default="full")
     parser.add_argument("--metrics_list", default="")
     parser.add_argument("--bootstrap_samples", type=int, default=_bootstrap_samples_default())
@@ -160,6 +168,14 @@ def main():
         help="RNG seed for reshuffle, normal/t reference series, and stationary bootstrap.",
     )
     args = parser.parse_args()
+
+    # Propagate --test_mode into the environment so helpers in
+    # ``hypothesis_config`` (lyap_k_steps, lyap_k_iterations, lyap_min_neighbors)
+    # and any subprocess inherit the same short-series defaults. Without this
+    # propagation, a direct ``hypothesis.py --test_mode true`` run on a sliced
+    # .dat fell back to production lyap_k flags and could fail.
+    if args.test_mode.strip().lower() in ("1", "true", "yes", "on"):
+        os.environ["DCH_TEST_MODE"] = "true"
 
     # Fail early on invalid scalar parameters. These checks catch batch-script
     # wiring mistakes before a long TISEAN/bootstrap run starts.
@@ -484,7 +500,9 @@ def main():
             "  ELLNER — Ellner extension (eq. 8.78) computed from .c2 over [r_min, r_max] auto-detected\n"
             "           from the same Takens plateau; reported SD is the Takens-plateau dispersion\n"
             "           (orientation of the interval quality).\n"
-            "  LLE   — median slope of the linear part of lyap_k S(t) across epsilon blocks at m=3\n"
+            "  LLE   — OLS slope of the highest-quality lyap_k S(t) block at m=3\n"
+            "           (best ε-block by (window length / OLS std_err)); reported SD is the\n"
+            "           OLS standard error of that slope, not a cross-block spread.\n"
             f"{rqa_block}\n"
         )
 

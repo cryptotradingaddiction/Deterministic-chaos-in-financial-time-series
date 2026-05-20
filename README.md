@@ -83,8 +83,9 @@ Optional environment overrides (no code changes):
 | `DCH_RUN_HYPOTHESIS` | If set to `false`, active invariant `.bat` scripts compute only the invariant outputs/plots and skip `hypothesis.py` plus `_hypothesis_aggregate_summary.txt` aggregation. Default is `true`. |
 | `DCH_DIMENSION_METRICS` | Controls which dimension metrics `correlation_dimension.bat` sends to `hypothesis.py`. Default: `ELLNER`. Valid practical values: `ELLNER`, `TAKENS`, `TAKENS,ELLNER`. |
 | `DCH_BOOTSTRAP_SAMPLES` | Default for `hypothesis.py --bootstrap_samples` when the CLI flag is omitted (desktop sets this from the GUI spinbox). |
-| `DCH_LYAP_STEPS` | `lyap_k -n` in test mode (default **40** when `DCH_TEST_MODE=true`). |
-| `DCH_LYAP_MIN_NEIGHBORS` | `lyap_k -s` and LLE block filter in test mode (default **3** when `DCH_TEST_MODE=true`). |
+| `DCH_LYAP_STEPS` | `lyap_k -n` (number of reference points). Defaults: **500** production, **200** when `DCH_TEST_MODE=true`. |
+| `DCH_LYAP_ITERATIONS` | `lyap_k -s` (length of the S(t) curve). Defaults: **100** production, **30** when `DCH_TEST_MODE=true`. |
+| `DCH_LYAP_MIN_NEIGHBORS` | Python-side neighbour filter in `extract_lle_ols` (**not** a `lyap_k` flag). Defaults: **10** production, **3** when `DCH_TEST_MODE=true`. |
 
 &nbsp;
 
@@ -839,7 +840,7 @@ If $|\mathrm{TS}| > 3$, the null that the series is independent noise is rejecte
   $$d_2^{(E)} = \frac{C^{(m)}(r_{\max}) - C^{(m)}(r_{\min})}{\displaystyle\int_{r_{\min}}^{r_{\max}} \frac{C(r)}{r}\, dr}$$
 
   evaluated on `.c2` as **ELLNER**.
-- **LLE:** median Kantz slope across usable `lyap_k` ε-blocks at `m=3` (see `invariants_lyapunov.extract_lle_mean_std`). `lyap_k` is called with **`-t<W>`** matching `W_D2_<sym>`. Short test series (≈100 points) may yield `insufficient data` for LLE even when bootstrap runs complete.
+- **LLE:** OLS slope of the highest-quality `lyap_k` ε-block at `m=3`, where quality = $(t_{\mathrm{hi}}-t_{\mathrm{lo}})/\mathrm{std\_err}$ (see `invariants_lyapunov.find_best_lle_block` / `extract_lle_ols`). `lyap_k` is called with **`-t<W>`** matching `W_D2_<sym>` and **`-s<DCH_LYAP_ITERATIONS>`** (default **100**, test mode **30**) for the S(t) curve length. Short test series (≈100 points) often have too few neighbours and yield `insufficient data` even when bootstrap runs complete.
 - **RQA:** PyRQA scalars on the full series. Default: **4-th percentile** radius from embedded pairwise distances (`--rqa_radius_mode percentile`), locked from the original for bootstrap/reference runs when `--rqa_bootstrap on`. `RAD_RQA_<sym>` remains a fallback. PyRQA `theiler_corrector` uses `W_D2_<sym>` (mapped from TISEAN Theiler `W` via `tisean_theiler_min_diagonal_k`).
 
 Use `--rqa_bootstrap off` for legacy original-only RQA (no TS column). `--seed` (default `0`) fixes reshuffle, reference series, and bootstrap draws.
@@ -1378,10 +1379,10 @@ Interpretation:
 
 - **Embedding dimension is fixed at m = 3** (`-m3 -M3`).
 - **`-t<W>`** uses **`W_D2_<sym>`** from `theilers_w.bat` (same temporal exclusion as `d2.exe -t<W>`). **`tisean_io.run_lyap_k`** passes the same `-t` when `hypothesis.py` recomputes LLE.
-- **Full mode:** `-n500 -s10` (defaults in `Lambda_max.bat`). **Test mode:** `-n` / `-s` from `DCH_LYAP_STEPS` / `DCH_LYAP_MIN_NEIGHBORS` (defaults **40** / **3** via `_dch_test_env.bat`).
+- **Full mode:** `-n500 -s100` (defaults in `Lambda_max.bat`; `STEPS`, `ITER`). **Test mode:** `-n` from `DCH_LYAP_STEPS` (default **200**), `-s` from `DCH_LYAP_ITERATIONS` (default **30**) via `_dch_test_env.bat`. `DCH_LYAP_MIN_NEIGHBORS` is a Python-only filter inside `extract_lle_ols`.
 - Neighbourhood search uses **TISEAN defaults** for `-r` and `-R` (because the flags are omitted): approximately data interval / 1000 and data interval / 100.
 - **Gnuplot (`Lambda_max.bat`):** each output **block** is one **ε-scan** at fixed embedding dimension (`#epsilon= … dim= …`). Legends label **ε blocks**, not different **m**.
-- **Hypothesis:** median Kantz slope across usable ε-blocks; included in the stationary-bootstrap **TS** test like dimension metrics.
+- **Hypothesis:** OLS slope of the highest-quality ε-block at `m=3` (selected via `find_best_lle_block`); the OLS standard error of that slope is the per-replicate uncertainty. The slope is then plugged into the stationary-bootstrap **TS** test like the dimension metrics.
 
 For comparison, **Rosenstein’s method** is `lyap_r` (not used in this repo); see [lyap_r](https://www.pks.mpg.de/tisean/Tisean_3.0.1/docs/docs_c/lyap_r.html).
 

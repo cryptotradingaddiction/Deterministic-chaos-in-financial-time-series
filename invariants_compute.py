@@ -34,7 +34,9 @@ def compute_invariants(series_array, output_dir, label, delay, theiler,
       ELLNER — Ellner extension (eq. 8.78) evaluated on .c2 between the same
                r_min and r_max. The reported SD/n come from the Takens plateau
                dispersion and serve as an orientation for the interval quality.
-      LLE   — median lyap_k S(t) slope across epsilon blocks at m=3
+      LLE   — OLS slope of the highest-quality lyap_k S(t) block at m=3
+              (selected via ``invariants_lyapunov.find_best_lle_block``);
+              uncertainty is the OLS std_err of the selected slope.
       RQA   — one metric value computed on the full time series
 
     For RQA, the recurrence radius is selected dynamically when

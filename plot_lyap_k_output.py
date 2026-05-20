@@ -9,8 +9,8 @@ Standalone usage (raw curves only):
 
     py -3 plot_lyap_k_output.py C:\DCh\data\results\lambda_max_test_100\BTCUSD_run2_tau2\BTCUSD_lyap.txt
 
-With the Kantz / hypothesis LLE fit line (median LLE across epsilon blocks; one
-representative block's linear window — same rule as `hypothesis.extract_lle_mean_std`):
+With the Kantz / hypothesis LLE fit line (OLS slope of the highest-quality
+ε-block; same rule as ``invariants_lyapunov.extract_lle_ols``):
 
     py -3 plot_lyap_k_output.py PATH\BASE_lyap.txt --orig-lle-fit --output PATH\BASE_lyap_lle_fit.png
 
@@ -138,136 +138,78 @@ def block_label(index: int, block: LyapBlock) -> str:
     return ", ".join(parts)
 
 
-def _block_slopes_for_lle_plot(blocks, min_neighbors):
-    """
-    Mirrors the logic in `hypothesis.extract_lle_mean_std` to filter blocks
-    based on neighborhood density and calculates the linear slope (LLE estimate) for each.
-    
-    Returns:
-        list of tuples: Each tuple contains the block dictionary and its calculated slope.
-    """
-    # Import internal project dependencies dynamically to avoid circular imports or missing modules in standalone mode
-    from hypothesis import MIN_LYAP_NEIGHBORS, _best_linear_slope
-
-    # Determine the strict minimum neighbors threshold to consider a block valid
-    mn = int(min_neighbors) if min_neighbors is not None else int(MIN_LYAP_NEIGHBORS)
-    pairs = []
-    
-    # First pass: Try to find valid slopes for blocks that meet the strict min_neighbors criteria
-    for blk in blocks:
-        if blk["n_neighbors"] < mn:
-            continue
-        data = blk["data"]
-        # Need at least 3 points to reliably fit a line
-        if data.shape[0] < 3:
-            continue
-            
-        # Calculate the slope of the linear scaling region (this slope IS the Lyapunov exponent)
-        slope = _best_linear_slope(data[:, 0], data[:, 1])
-        if np.isfinite(slope):
-            pairs.append((blk, float(slope)))
-
-    # Fallback pass: If no blocks met the strict criteria, relax the neighbor constraint and process all blocks
-    if not pairs:
-        for blk in blocks:
-            data = blk["data"]
-            if data.shape[0] < 3:
-                continue
-            slope = _best_linear_slope(data[:, 0], data[:, 1])
-            if np.isfinite(slope):
-                pairs.append((blk, float(slope)))
-                
-    return pairs
-
-
 def plot_orig_lle_fit(lyap_path: str, out_png: str, title: str | None = None) -> None:
     """
-    Plots all epsilon S(t) curves and superimposes a bold red line representing 
-    the final calculated Largest Lyapunov Exponent (LLE) fit.
-    
-    This heavily relies on the custom `hypothesis` module to parse and calculate the LLE.
-    """
-    # Dynamically import required functions from the project's internal modules
-    from hypothesis import (
-        M_LYAP,
-        MIN_LYAP_NEIGHBORS,
-        _best_linear_slope_window,
-        _parse_lyap_blocks,
-        extract_lle_mean_std,
-    )
-    from hypothesis_config import lyap_min_neighbors
+    Plot all epsilon S(t) curves and overlay the OLS linear fit chosen by
+    :func:`invariants_lyapunov.extract_lle_ols`.
 
-    # Parse the blocks using the hypothesis module's parser, restricted to the target embedding dimension
+    The overlay corresponds to the **same** ε-block, window, and slope used by
+    the hypothesis test (highest-quality block by ``(t_hi - t_lo) / std_err``),
+    so the plot and the TS table cannot disagree.
+    """
+    from invariants_lyapunov import (
+        M_LYAP,
+        _parse_lyap_blocks,
+        find_best_lle_block,
+    )
+
+    # Parse the blocks using the same parser as the hypothesis pipeline.
     blocks = _parse_lyap_blocks(lyap_path, dim=M_LYAP)
     if not blocks:
         print(f"WARNING: No lyap_k blocks parsed from {lyap_path}; skipping LLE fit plot.")
         return
 
-    # Extract the final LLE statistics (median, standard deviation, and number of valid blocks used)
-    lle, lle_sd, n_blk = extract_lle_mean_std(lyap_path)
-    
-    # Get the individual slopes for all valid blocks to find the most representative one
-    pairs = _block_slopes_for_lle_plot(blocks, lyap_min_neighbors())
+    # Identical selection rule to extract_lle_ols.
+    best, candidates = find_best_lle_block(lyap_path)
+    n_blocks = len(candidates)
 
-    # Initialize the matplotlib figure
     fig, ax = plt.subplots(figsize=(12, 7))
-    
-    # Plot the raw S(t) curves for all parsed blocks
+
+    # Plot all raw S(t) curves at m=M_LYAP. Legend is truncated to keep it readable.
     for i, blk in enumerate(blocks, start=1):
         d = blk["data"]
         if d.shape[0] < 2:
             continue
         lab = f"eps={blk['eps']:.3g}, n_med={blk['n_neighbors']}"
-        # Plot with slight transparency. Limit the legend to the first 12 blocks to avoid clutter.
         ax.plot(d[:, 0], d[:, 1], linewidth=1.0, alpha=0.75, label=lab if i <= 12 else None)
 
-    # If we successfully calculated a valid LLE and have slopes to compare against
-    if np.isfinite(lle) and pairs:
-        # Find the specific block whose local slope is closest to the median overall LLE
-        # This gives us a "representative" block to draw the fit line on
-        best_blk, best_slope = min(pairs, key=lambda p: abs(p[1] - lle))
-        data = best_blk["data"]
-        
-        # Calculate the exact window (start and end times) where the linear fit was applied.
-        # The 5th return value (OLS std_err of slope) is unused here.
-        slope_w, t0, t1, intercept, _std_err = _best_linear_slope_window(
-            data[:, 0], data[:, 1]
+    # Overlay the OLS fit on the chosen block's window.
+    if best is not None:
+        (_quality, best_slope, best_std_err, best_eps,
+         best_t_lo, best_t_hi, best_intercept, _nn) = best
+        tt = np.linspace(best_t_lo, best_t_hi,
+                         max(50, int((best_t_hi - best_t_lo) * 4) + 1))
+        ss = best_slope * tt + best_intercept
+        ax.plot(
+            tt, ss,
+            color="crimson",
+            linewidth=2.6,
+            zorder=6,
+            label=(
+                f"LLE OLS={best_slope:.5g} ± {best_std_err:.3g} "
+                f"(eps={best_eps:.3g}, n_blocks={n_blocks})"
+            ),
         )
-        
-        if np.isfinite(slope_w) and np.isfinite(t0) and np.isfinite(t1) and np.isfinite(intercept):
-            # Generate points to draw the linear fit line
-            tt = np.linspace(t0, t1, max(50, int((t1 - t0) * 4) + 1))
-            ss = slope_w * tt + intercept
-            
-            # Plot the best-fit line in bold crimson so it stands out against the raw curves
-            ax.plot(
-                tt,
-                ss,
-                color="crimson",
-                linewidth=2.6,
-                zorder=6, # Ensure the line is drawn on top of the other curves
-                label=(
-                    f"LLE median={lle:.5g} (n_blocks={n_blk}); "
-                    f"fit window eps={best_blk['eps']:.3g}, local slope={best_slope:.5g}"
-                ),
-            )
-
-    # Set up the aesthetics of the plot (titles, labels, grid)
-    ax.set_title(title or f"lyap_k S(t) + LLE fit: {os.path.basename(lyap_path)}")
-    ax.set_xlabel("iteration t")
-    ax.set_ylabel("S(t) = logarithm of stretching factor")
-    
-    # Add a text box in the upper left corner displaying the standard deviation of the LLE
-    if np.isfinite(lle_sd):
         ax.text(
-            0.02,
-            0.98,
-            f"LLE std across ε-blocks: {lle_sd:.5g}",
+            0.02, 0.98,
+            f"OLS std_err of selected block's slope: {best_std_err:.5g}\n"
+            f"window t=[{best_t_lo:.3g}, {best_t_hi:.3g}]",
             transform=ax.transAxes,
             va="top",
             fontsize=9,
             bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.35),
         )
+    else:
+        ax.text(
+            0.02, 0.98,
+            "extract_lle_ols: no block produced a finite (slope, std_err>0) fit.",
+            transform=ax.transAxes, va="top", fontsize=9,
+            bbox=dict(boxstyle="round", facecolor="mistyrose", alpha=0.5),
+        )
+
+    ax.set_title(title or f"lyap_k S(t) + LLE OLS fit: {os.path.basename(lyap_path)}")
+    ax.set_xlabel("iteration t")
+    ax.set_ylabel("S(t) = logarithm of stretching factor")
         
     # Final styling adjustments
     ax.grid(True, alpha=0.35)

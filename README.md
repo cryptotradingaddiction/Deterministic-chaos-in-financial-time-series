@@ -256,12 +256,12 @@ This section is the **method-first map**: each quantity used in the thesis pipel
 
 | Object | Math / book ref. | Code path |
 |--------|------------------|-----------|
-| Correlation sum $C^{(m)}(r)$ | Grassberger–Procaccia integral | **TISEAN** `d2.exe` via `tisean_io.run_d2` (`-dτ -M1,3 -tW`); batch: `correlation_dimension.bat` |
-| Takens curve $d_2^{(T)}(r')$ | Eqs. 8.75–8.76 | **TISEAN** `c2t.exe` via `tisean_io.run_c2t` → `*_takens.dat` |
-| Plateau on $\ln r'$ | Stable scaling region (after 8.77) | `invariants_correlation.select_plateau_values` ← `extract_takens_plateau` ← `tisean_io.extract_tagged_block(..., tag="#m")` |
-| **TAKENS** | Mean of $d_2^{(T)}$ on plateau at $m=3$ | `invariants_correlation.extract_takens_plateau` → `invariants_compute.compute_invariants` (metric key `TAKENS`) |
+| Correlation sum $C^{(m)}(r)$ | Grassberger–Procaccia integral | **TISEAN** `d2.exe` via `tisean_io.run_d2` (`-dτ -M1,10 -tW`; `hypothesis_config.D2_DIAGNOSTIC_M_MAX`); batch: `correlation_dimension.bat` |
+| Takens curve $d_2^{(T)}(r')$ | Eqs. 8.75–8.76 | **TISEAN** `c2t.exe` via `tisean_io.run_c2t` → `*_takens.dat` (blocks $m=1\ldots 10$ for plots) |
+| Plateau on $\ln r'$ | Stable scaling region (after 8.77) | `invariants_correlation.select_plateau_values` ← `extract_takens_plateau` ← `tisean_io.extract_tagged_block(..., tag="#m")` (edge-margin search, $\sqrt{\cdot}$ length bonus weight 0.5, returns NaN when $n < $ `MIN_PLATEAU_POINTS`) |
+| **TAKENS** | Mean of $d_2^{(T)}$ on plateau at $m=M_{D_2}=3$ | `invariants_correlation.extract_takens_plateau` → `invariants_compute.compute_invariants` (metric key `TAKENS`) |
 | $r_{\min}, r_{\max}$ | Plateau endpoints | Returned by `extract_takens_plateau` |
-| **ELLNER** $d_2^{(E)}$ | Eq. 8.78 on $[r_{\min}, r_{\max}]$ | `invariants_correlation.compute_ellner_from_c2` (trapezoid on `.c2` block `#dim=3`) → `compute_invariants` (`ELLNER`) |
+| **ELLNER** $d_2^{(E)}$ | Eq. 8.78 on $[r_{\min}, r_{\max}]$ | `invariants_correlation.compute_ellner_from_c2` — full-grid `np.interp` for $C(r_{\min}), C(r_{\max})$; log-$r$ trapezoid $\int C(r)\, d(\ln r)$; `.c2` block `#dim=3` → `compute_invariants` (`ELLNER`) |
 | Hypothesis orchestration | CLI + bootstrap loop | `hypothesis.py` → `hypothesis_cli.main`; batch: `correlation_dimension.bat` → `--metrics_list %DCH_DIMENSION_METRICS%` |
 
 ---
@@ -843,7 +843,7 @@ If $|\mathrm{TS}| > 3$, the null that the series is independent noise is rejecte
 
 Use `--rqa_bootstrap off` for legacy original-only RQA (no TS column). `--seed` (default `0`) fixes reshuffle, reference series, and bootstrap draws.
 
-`d2.exe` currently runs with `-M1,3 -#100 -N0`, matching `EMBED=1,3` in `correlation_dimension.bat`. `-#100` fixes the epsilon grid size explicitly and `-N0` uses all available pairs instead of TISEAN's default pair cap. The radius scan is otherwise left at the TISEAN default so the `.d2` diagnostic plot and the `.c2` input for `c2t.exe` cover the full available scale range; the practical scale choice is made afterwards by plateau detection on the Takens curve.
+`d2.exe` currently runs with `-M1,10 -#100 -N0`, matching `EMBED=1,10` in `correlation_dimension.bat` (`hypothesis_config.D2_DIAGNOSTIC_M_MAX`). The full $m = 1\ldots 10$ sweep is for diagnostic plots only; **TAKENS** and **ELLNER** point estimates are extracted from the $m = M_{D_2} = 3$ block in `.c2` / `*_takens.dat`. `-#100` fixes the epsilon grid size explicitly and `-N0` uses all available pairs instead of TISEAN's default pair cap. The radius scan is otherwise left at the TISEAN default so the `.d2` diagnostic plot and the `.c2` input for `c2t.exe` cover the full available scale range; the practical scale choice is made afterwards by plateau detection on the Takens curve. Plateau detection (`invariants_correlation.select_plateau_values`) ignores the first/last two epsilon samples by default and uses a $\sqrt{\cdot}$-scaled length bonus with weight 0.5; the Ellner integral $\int_{r_{\min}}^{r_{\max}} C(r)/r\, dr$ is evaluated in log-$r$ as $\int C(r)\, d(\ln r)$.
 
 ---
 
@@ -1460,7 +1460,7 @@ Manual: [recurr](https://www.pks.mpg.de/tisean/Tisean_3.0.1/docs/docs_c/recurr.h
 d2.exe -d<tau> -M1,3 -t<W> -#100 -N0 -o "<OUT>\<BASE>" "<DATA.dat>"
 ```
 
-- `EMBED=1,3` ⇒ embedding dimensions **1 through 3** (single `d2` run writes multi-block files).
+- `EMBED=1,10` ⇒ embedding dimensions **1 through 10** for the diagnostic `d2` sweep; **TAKENS / ELLNER values use the m=3 block only** (`hypothesis_config.M_D2`).
 - `-#100` fixes 100 epsilon values; `-N0` uses all pairs rather than the default cap.
 - `correlation_dimension.bat` additionally runs `c2t.exe -V0 -o "<BASE>_takens.dat" "<BASE>.c2"` inside the output directory to avoid the FORTRAN path-length limit.
 - Per coin: `tau = TAU_D2_<sym>`, `W = W_D2_<sym>` from `_per_coin_settings.bat` (defaults `3` / `0` if unset).

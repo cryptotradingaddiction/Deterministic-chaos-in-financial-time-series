@@ -109,11 +109,12 @@ def read_tagged_block(path, dim=3, tag="#dim"):
     return np.array(rows, dtype=float)
 
 
-def _stable_plateau_values(block, value_col=1, min_points=8):
-    """Return `(y_values, r_min, r_max)` for the best plateau window.
+def _stable_plateau_values(block, value_col=1, min_points=8, edge_margin=2):
+    """Return ``(y_values, r_min, r_max)`` for the best plateau window.
 
-    Mirrors `hypothesis.select_plateau_values`. `r_min` / `r_max` are NaN when
-    no usable rows are present.
+    Mirrors :func:`invariants_correlation.select_plateau_values` so the
+    boot_aggregate / takens_value / ellner_plot_data outputs stay in sync with
+    the live hypothesis pipeline. See that function for parameter semantics.
     """
     b = np.asarray(block, dtype=float)
     if b.size == 0 or b.ndim < 2 or b.shape[1] <= value_col:
@@ -131,11 +132,17 @@ def _stable_plateau_values(block, value_col=1, min_points=8):
     y = values[order]
     n = y.size
     if n < min_points:
-        return y, float(eps_sorted[0]), float(eps_sorted[-1])
+        return np.array([], dtype=float), float("nan"), float("nan")
+    eff_margin = max(0, int(edge_margin))
+    if n - 2 * eff_margin < min_points:
+        eff_margin = max(0, (n - min_points) // 2)
+    i_lo = eff_margin
+    i_hi = n - eff_margin
+    interior = max(1, i_hi - i_lo)
     best_score = -np.inf
-    best_ij = (0, n)
-    for i in range(0, n - min_points + 1):
-        for j in range(i + min_points, n + 1):
+    best_ij = (i_lo, i_hi)
+    for i in range(i_lo, i_hi - min_points + 1):
+        for j in range(i + min_points, i_hi + 1):
             xs = x[i:j]
             ys = y[i:j]
             mean_abs = abs(float(np.mean(ys))) + 1e-12
@@ -144,9 +151,9 @@ def _stable_plateau_values(block, value_col=1, min_points=8):
             except Exception:
                 continue
             rel_slope = abs(float(slope)) / mean_abs
-            rel_sd = float(np.std(ys, ddof=1)) / mean_abs if ys.size > 1 else np.inf
-            length_bonus = (j - i) / n
-            score = 0.10 * length_bonus - rel_slope - rel_sd
+            rel_sd = float(np.std(ys, ddof=1)) / mean_abs if ys.size > 1 else float("inf")
+            length_bonus = np.sqrt((j - i) / interior)
+            score = 0.5 * length_bonus - rel_slope - rel_sd
             if score > best_score:
                 best_score = score
                 best_ij = (i, j)
@@ -186,13 +193,17 @@ def _ellner_from_c2(c2_path, r_min, r_max, dim=3):
         return float("nan")
     r_sel = r[mask]
     c_sel = c[mask]
-    c_max = float(np.interp(r_max, r_sel, c_sel))
-    c_min = float(np.interp(r_min, r_sel, c_sel))
+    # Interpolate against the full sorted grid for accurate boundary values
+    # (see invariants_correlation.compute_ellner_from_c2).
+    c_max = float(np.interp(r_max, r, c))
+    c_min = float(np.interp(r_min, r, c))
     if not (np.isfinite(c_max) and np.isfinite(c_min)) or c_max <= c_min:
         return float("nan")
-    integrand = c_sel / r_sel
+    # Integrate in log-r so the exponential epsilon grid is treated correctly:
+    # ∫ C(r)/r dr = ∫ C(r) d(ln r).
+    log_r_sel = np.log(r_sel)
     _trapz = getattr(np, "trapezoid", np.trapz)
-    integral = float(_trapz(integrand, r_sel))
+    integral = float(_trapz(c_sel, log_r_sel))
     if not np.isfinite(integral) or integral <= 0.0:
         return float("nan")
     return float((c_max - c_min) / integral)

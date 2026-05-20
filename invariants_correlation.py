@@ -1,18 +1,45 @@
 """Takens plateau and Ellner correlation-dimension estimators."""
 
+import logging
+
 import numpy as np
 
 from hypothesis_config import M_D2, MIN_PLATEAU_POINTS
 from tisean_io import extract_tagged_block
 
+logger = logging.getLogger(__name__)
 
-def select_plateau_values(rows, min_points=MIN_PLATEAU_POINTS):
+# Number of leading / trailing samples excluded from the candidate plateau
+# window. The smallest epsilon points are dominated by discretization noise on
+# C(r); the largest are dominated by finite-sample saturation. Keeping the
+# search away from those endpoints prevents the plateau picker from latching
+# onto an accidentally-flat edge region.
+DEFAULT_PLATEAU_EDGE_MARGIN = 2
+
+# Weight of the length bonus inside the plateau score. The bonus uses sqrt so
+# longer windows are clearly preferred but the marginal gain saturates near the
+# full available range, leaving room for the flatness penalty to win.
+PLATEAU_LENGTH_WEIGHT = 0.5
+
+
+def select_plateau_values(rows, min_points=MIN_PLATEAU_POINTS,
+                          edge_margin=DEFAULT_PLATEAU_EDGE_MARGIN):
     """Select a stable scaling/plateau window from (epsilon, value) rows.
 
-    Returns `(y_values, r_min, r_max)` where `y_values` are the plateau values
-    sorted by ln(epsilon) and `r_min`, `r_max` are the epsilon end-points of the
-    selected window (in the original linear scale). `r_min` / `r_max` are NaN if
-    no usable rows were supplied.
+    Returns ``(y_values, r_min, r_max)`` where ``y_values`` are the plateau
+    values sorted by ln(epsilon) and ``r_min`` / ``r_max`` are the epsilon
+    end-points of the selected window (in the original linear scale).
+
+    Returns ``(empty, NaN, NaN)`` when fewer than ``min_points`` usable rows are
+    available. Returning the whole short set was previously misleading: no real
+    plateau detection had happened, but the caller treated the bounds as valid.
+
+    ``edge_margin`` excludes the first and last ``edge_margin`` samples from the
+    candidate window. The smallest-epsilon points are biased by C(r)
+    discretization and the largest-epsilon points by saturation, so a plateau
+    placed at the very edge is rarely physical. When the searchable interior
+    cannot accommodate ``min_points``, the margin is relaxed and a warning is
+    logged so the caller knows the choice was forced.
     """
     arr = np.asarray(rows, dtype=float)
     if arr.size == 0 or arr.ndim != 2 or arr.shape[1] < 2:
@@ -34,23 +61,41 @@ def select_plateau_values(rows, min_points=MIN_PLATEAU_POINTS):
     y = values[order]
     n = y.size
     if n < min_points:
-        return y, float(eps_sorted[0]), float(eps_sorted[-1])
+        logger.warning(
+            "select_plateau_values: only %d usable points (need >= %d); "
+            "plateau detection skipped.", n, min_points,
+        )
+        return np.array([], dtype=float), np.nan, np.nan
 
-    # Window scoring favours flat, low-variance, and reasonably long regions.
-    #
-    # Book connection:
-    # After equation (8.77), the text recommends treating d_2^(T)(r') as a
-    # function of scale r' and estimating the correlation dimension from a
-    # plateau in the graph d_2^(T)(r') versus ln(r'), instead of choosing a single
-    # ad hoc r'. This function operationalizes that instruction. The score is
-    # deliberately transparent: penalize slope and relative spread, add a small
-    # bonus for longer intervals.
+    # Restrict the candidate window to the interior so discretization artefacts
+    # at the smallest/largest epsilon cannot anchor the choice. Relax the margin
+    # only if the interior would otherwise be too short for ``min_points``.
+    eff_margin = max(0, int(edge_margin))
+    if n - 2 * eff_margin < min_points:
+        eff_margin = max(0, (n - min_points) // 2)
+        logger.warning(
+            "select_plateau_values: relaxed edge_margin to %d "
+            "(n=%d, min_points=%d).", eff_margin, n, min_points,
+        )
+    i_lo = eff_margin
+    i_hi = n - eff_margin
+
+    # Score: flat + low-spread + reasonably long. The length term uses sqrt so
+    # the marginal benefit of extending the window saturates near the full
+    # available interior, preventing the optimum from always being the largest
+    # interior window. Weight 0.5 (was 0.10) makes the bonus comparable to the
+    # flatness / spread penalties for typical financial dimensions.
     best_score = -np.inf
-    best_ij = (0, n)
-    for i in range(0, n - min_points + 1):
-        for j in range(i + min_points, n + 1):
+    best_ij = (i_lo, i_hi)
+    interior = max(1, i_hi - i_lo)
+    for i in range(i_lo, i_hi - min_points + 1):
+        for j in range(i + min_points, i_hi + 1):
             xs = x[i:j]
             ys = y[i:j]
+            # mean_abs guards against division by zero. For correlation
+            # dimensions the mean cannot reach zero, but keeping the guard means
+            # an accidentally near-zero mean (e.g. a sign-flipped curve segment)
+            # produces a very large rel_slope/rel_sd and is therefore rejected.
             mean_abs = abs(float(np.mean(ys))) + 1e-12
             try:
                 slope, _ = np.polyfit(xs, ys, 1)
@@ -58,18 +103,29 @@ def select_plateau_values(rows, min_points=MIN_PLATEAU_POINTS):
                 continue
             rel_slope = abs(float(slope)) / mean_abs
             rel_sd = float(np.std(ys, ddof=1)) / mean_abs if ys.size > 1 else np.inf
-            length_bonus = (j - i) / n
-            score = 0.10 * length_bonus - rel_slope - rel_sd
+            length_bonus = np.sqrt((j - i) / interior)
+            score = PLATEAU_LENGTH_WEIGHT * length_bonus - rel_slope - rel_sd
             if score > best_score:
                 best_score = score
                 best_ij = (i, j)
 
     i, j = best_ij
+    if i == i_lo or j == i_hi:
+        logger.warning(
+            "select_plateau_values: optimum touches search edge "
+            "(i=%d, j=%d, i_lo=%d, i_hi=%d, n=%d) — scaling may extend "
+            "beyond the d2 grid.", i, j, i_lo, i_hi, n,
+        )
     return y[i:j], float(eps_sorted[i]), float(eps_sorted[j - 1])
 
 
 def _pearson_abs(x, y):
-    """Absolute Pearson correlation with guards for degenerate windows."""
+    """Absolute Pearson correlation with guards for degenerate windows.
+
+    Used by :mod:`invariants_lyapunov` to score linear-window candidates in the
+    Kantz S(t) curve. Kept here so the dimension and Lyapunov modules share one
+    implementation of the same numerical guard.
+    """
     if len(x) < 2 or len(y) < 2:
         return np.nan
     sx = float(np.std(x, ddof=1))
@@ -186,16 +242,23 @@ def compute_ellner_from_c2(c2_file, r_min, r_max, dim=M_D2):
         return np.nan
     r_sel = r[mask]
     c_sel = c[mask]
-    c_max = float(np.interp(r_max, r_sel, c_sel))
-    c_min = float(np.interp(r_min, r_sel, c_sel))
+    # Interpolate C at r_min, r_max against the FULL sorted grid (not the
+    # masked subset) so the endpoints use the two nearest grid points on each
+    # side. Interpolating against r_sel would clamp to r_sel[0] / r_sel[-1]
+    # whenever r_min / r_max fall strictly between grid points, biasing both
+    # boundary values toward the included subset.
+    c_max = float(np.interp(r_max, r, c))
+    c_min = float(np.interp(r_min, r, c))
     if not (np.isfinite(c_max) and np.isfinite(c_min)) or c_max <= c_min:
         return np.nan
-    # Trapezoidal integration is adequate here because d2.exe already gives a
-    # dense, ordered grid of radius values. NumPy renamed trapz -> trapezoid in
-    # recent versions, so use the new function when available.
-    integrand = c_sel / r_sel
+    # d2.exe uses an exponentially spaced epsilon grid (``-#100`` steps with
+    # multiplicative factor). Trapezoidal integration in linear r over-weights
+    # the large-r side. Substitute u = ln r so the integrand
+    # C(r)/r * dr becomes C(r) * d(ln r), which is the natural form on a
+    # log-spaced grid and matches the way the plateau is detected in ln r.
+    log_r_sel = np.log(r_sel)
     _trapz = getattr(np, "trapezoid", np.trapz)
-    integral = float(_trapz(integrand, r_sel))
+    integral = float(_trapz(c_sel, log_r_sel))
     if not np.isfinite(integral) or integral <= 0.0:
         return np.nan
     return float((c_max - c_min) / integral)

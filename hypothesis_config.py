@@ -26,8 +26,12 @@ DEFAULT_HYPOTHESIS_SEED = 0
 # Degrees of freedom for t-distribution reference series
 T_DOF = 3.5
 
-# Must match -M1,3 in correlation_dimension.bat
+# Active invariant embedding dimension. d2.exe sweeps m = 1 .. D2_DIAGNOSTIC_M_MAX,
+# but TAKENS/ELLNER values are extracted from the m = M_D2 block only.
 M_D2 = 3
+# d2.exe runs over m = 1 .. D2_DIAGNOSTIC_M_MAX. Used by tisean_io.run_d2 (-M1,X)
+# and matched by correlation_dimension.bat (EMBED=1,X) so plots cover all m.
+D2_DIAGNOSTIC_M_MAX = 10
 M_LYAP = 3
 MIN_LYAP_LINEAR_POINTS = 3  # was 5; financial S(t) linear region is ~1-2 iterations
 MIN_LYAP_NEIGHBORS = 10

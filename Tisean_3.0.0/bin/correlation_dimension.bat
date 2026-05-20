@@ -31,8 +31,10 @@ set FILES=BTCUSD_BITSTAMP_1h_complete_logreturns.dat ETHUSD_BITSTAMP_1h_complete
 REM Per-coin (tau, W) overrides come from the shared settings file.
 call "%~dp0_per_coin_settings.bat"
 
-REM Fixed parameters: m range for d2.exe.
-set EMBED=1,3
+REM Fixed parameters: m range for d2.exe. Sweep covers 1..10 for diagnostic plots;
+REM TAKENS/ELLNER point estimates still come from the m=3 block (M_D2 in Python).
+set EMBED=1,10
+set EMBED_PLOT_MAX_IDX=9
 REM ----------------------------------------------------------------------------
 
 cd /d "%DATA_DIR%" || (echo ERROR: Cannot enter %DATA_DIR% & exit /b 1)
@@ -52,7 +54,7 @@ if /i "%TEST_MODE%"=="true" (
 )
 
 echo [INFO] Output root : %OUT_ROOT%
-echo [INFO] m setting   : %EMBED% (components,max_embed -> using m=3 block)
+echo [INFO] m setting   : %EMBED% (d2.exe sweep; TAKENS/ELLNER use m=3 block)
 echo [INFO] Hypothesis  : %RUN_HYPOTHESIS%
 echo [INFO] Dimension hypothesis metrics: %DIMENSION_METRICS%
 echo [INFO] Per-coin run:
@@ -196,11 +198,11 @@ del /q "!TAKENS_VALUE_TMP!" >nul 2>&1
 REM .c2 and c2t output are the active Takens/Ellner sources; .d2 local slopes are diagnostic.
 echo   [3/3] plot: log C, diagnostic local d_2, and Takens curves with Ellner intervals ...
 if /i "%HAS_GNUPLOT%"=="true" (
-    "%GNUPLOT_EXE%" -e "set terminal pngcairo size 1400,900 enhanced font 'Arial,12'; set output '!OUT_DIR!\!BASE!_C2_loglog_all_m.png'; set grid; set xlabel 'ln r'; set ylabel 'ln C^{(m)}(r)'; set title '!BASE! correlation integral ln C^{(m)}(r) vs ln r (tau=!TAU_DELAY!, W=!THEILER_W!)!PLOT_SUFFIX!'; set key left top font 'Arial,7' vertical maxrows 30; plot for [idx=0:2] '!OUT_DIR!\!BASE!.c2' index idx using (log($1)):(log($2)) with lines lw 1 title sprintf('m=%%d', idx+1)" > "!OUT_DIR!\gnuplot.log" 2>&1
+    "%GNUPLOT_EXE%" -e "set terminal pngcairo size 1400,900 enhanced font 'Arial,12'; set output '!OUT_DIR!\!BASE!_C2_loglog_all_m.png'; set grid; set xlabel 'ln r'; set ylabel 'ln C^{(m)}(r)'; set title '!BASE! correlation integral ln C^{(m)}(r) vs ln r (tau=!TAU_DELAY!, W=!THEILER_W!, m=1..%EMBED_PLOT_MAX_IDX%+1)!PLOT_SUFFIX!'; set key left top font 'Arial,7' vertical maxrows 30; plot for [idx=0:%EMBED_PLOT_MAX_IDX%] '!OUT_DIR!\!BASE!.c2' index idx using (log($1)):(log($2)) with lines lw (idx==2 ? 2.5 : 1) title sprintf('m=%%d%%s', idx+1, idx==2 ? ' (active)' : '')" > "!OUT_DIR!\gnuplot.log" 2>&1
     "%PYTHON_EXE%" %PYTHON_ARGS% "%PRINT_RESULTS%" file "!OUT_DIR!\!BASE!_C2_loglog_all_m.png"
-    "%GNUPLOT_EXE%" -e "set terminal pngcairo size 1400,900 enhanced font 'Arial,12'; set output '!OUT_DIR!\!BASE!_D2_all_m.png'; set grid; set xlabel 'ln r'; set ylabel 'd_2^{(m)}'; set title '!BASE! local correlation dimension d_2^{(m)} (tau=!TAU_DELAY!, W=!THEILER_W!)!PLOT_SUFFIX!'; set key right bottom font 'Arial,7' vertical maxrows 30; plot for [idx=0:2] '!OUT_DIR!\!BASE!.d2' index idx using (log($1)):2 with lines lw 1 title sprintf('m=%%d', idx+1)" >> "!OUT_DIR!\gnuplot.log" 2>&1
+    "%GNUPLOT_EXE%" -e "set terminal pngcairo size 1400,900 enhanced font 'Arial,12'; set output '!OUT_DIR!\!BASE!_D2_all_m.png'; set grid; set xlabel 'ln r'; set ylabel 'd_2^{(m)}'; set title '!BASE! local correlation dimension d_2^{(m)} (tau=!TAU_DELAY!, W=!THEILER_W!, m=1..%EMBED_PLOT_MAX_IDX%+1)!PLOT_SUFFIX!'; set key right bottom font 'Arial,7' vertical maxrows 30; plot for [idx=0:%EMBED_PLOT_MAX_IDX%] '!OUT_DIR!\!BASE!.d2' index idx using (log($1)):2 with lines lw (idx==2 ? 2.5 : 1) title sprintf('m=%%d%%s', idx+1, idx==2 ? ' (active)' : '')" >> "!OUT_DIR!\gnuplot.log" 2>&1
     "%PYTHON_EXE%" %PYTHON_ARGS% "%PRINT_RESULTS%" file "!OUT_DIR!\!BASE!_D2_all_m.png"
-    "%GNUPLOT_EXE%" -e "set terminal pngcairo size 1400,900 enhanced font 'Arial,12'; set output '!OUT_DIR!\!BASE!_takens_all_m.png'; set grid; set xlabel 'ln r'; set ylabel 'dimension estimate'; set title '!BASE! Takens d_2^T with Ellner d_2^E intervals (tau=!TAU_DELAY!, W=!THEILER_W!)!PLOT_SUFFIX!'; set key right bottom font 'Arial,7' vertical maxrows 30; plot for [idx=0:2] '!OUT_DIR!\!BASE!_takens.dat' index idx using (log($1)):2 with lines lw 1 title sprintf('Takens m=%%d', idx+1), '!OUT_DIR!\!BASE!_ellner.dat' index 0 using (log($1)):2 with lines lw 3 dashtype 2 title 'Ellner interval', for [idx=1:2] '!OUT_DIR!\!BASE!_ellner.dat' index idx using (log($1)):2 with lines lw 3 dashtype 2 notitle" >> "!OUT_DIR!\gnuplot.log" 2>&1
+    "%GNUPLOT_EXE%" -e "set terminal pngcairo size 1400,900 enhanced font 'Arial,12'; set output '!OUT_DIR!\!BASE!_takens_all_m.png'; set grid; set xlabel 'ln r'; set ylabel 'dimension estimate'; set title '!BASE! Takens d_2^T with Ellner d_2^E intervals (tau=!TAU_DELAY!, W=!THEILER_W!, m=1..%EMBED_PLOT_MAX_IDX%+1)!PLOT_SUFFIX!'; set key right bottom font 'Arial,7' vertical maxrows 30; plot for [idx=0:%EMBED_PLOT_MAX_IDX%] '!OUT_DIR!\!BASE!_takens.dat' index idx using (log($1)):2 with lines lw (idx==2 ? 2.5 : 1) title sprintf('Takens m=%%d%%s', idx+1, idx==2 ? ' (active)' : ''), for [idx=0:%EMBED_PLOT_MAX_IDX%] '!OUT_DIR!\!BASE!_ellner.dat' index idx using (log($1)):2 with lines lw (idx==2 ? 3 : 2) dashtype 2 title (idx==0 ? 'Ellner interval' : '')" >> "!OUT_DIR!\gnuplot.log" 2>&1
     "%PYTHON_EXE%" %PYTHON_ARGS% "%PRINT_RESULTS%" file "!OUT_DIR!\!BASE!_takens_all_m.png"
 )
 echo(

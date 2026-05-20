@@ -14,11 +14,16 @@ import sys
 
 from config_loader import PIPELINE_SYMBOLS, audit_invariant_parameters
 from hypothesis_config import (
+    D2_DIAGNOSTIC_M_MAX,
     DEFAULT_BOOTSTRAP_SAMPLES,
     DEFAULT_STATIONARY_BLOCK_MEAN,
     M_D2,
     M_LYAP,
+    M_LYAP_DIAGNOSTIC_MAX,
     RQA_EMBEDDING_DIM,
+    lyap_k_iterations,
+    lyap_k_steps,
+    lyap_min_neighbors,
 )
 
 
@@ -28,6 +33,7 @@ def main() -> int:
     print()
     print("Formal invariants (TAKENS/ELLNER, LLE, RQA hypothesis path)")
     print(f"  embedding m     : {M_D2} (d2/c2t), {M_LYAP} (lyap_k), {RQA_EMBEDDING_DIM} (PyRQA/recurr)")
+    print(f"  diagnostic m    : d2 sweeps 1..{D2_DIAGNOSTIC_M_MAX}, lyap_k sweeps {M_LYAP}..{M_LYAP_DIAGNOSTIC_MAX} (plots only)")
     print(f"  tau, W per coin : _per_coin_settings.bat (W_D2_* := TAU_D2_* after theilers_w.bat)")
     print(f"  PyRQA Theiler   : W+1 via tisean_theiler_min_diagonal_k (matches TISEAN |i-j|<=W)")
     print(f"  series scale    : raw log-returns (liquidity-cut .dat when present; no z-score)")
@@ -38,6 +44,7 @@ def main() -> int:
         else str(DEFAULT_STATIONARY_BLOCK_MEAN)
     )
     print(f"  block length    : {blk} (env DCH_STATIONARY_BLOCK_MEAN or --stationary_block_mean)")
+    print(f"  lyap_k flags    : -n {lyap_k_steps()} ref pts, -s {lyap_k_iterations()} iters; min_neighbors={lyap_min_neighbors()}")
     print()
     print("Intentional differences (not errors)")
     print("  cao_.py         : m = 1..d_max (dimension selection diagnostic)")

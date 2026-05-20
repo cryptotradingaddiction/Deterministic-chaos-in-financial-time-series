@@ -28,9 +28,15 @@ REM Per-coin tau overrides come from the shared settings file.
 call "%~dp0_per_coin_settings.bat"
 
 REM Fixed parameters for lyap_k (Kantz algorithm).
+REM   M_MIN..M_MAX : embedding sweep for diagnostic plots; OLS slope still extracted at m=M_PRIMARY
+REM   STEPS        : lyap_k -n (reference points used to average S(t))
+REM   ITER         : lyap_k -s (forward iteration count = length of S(t) curve)
+REM   MIN_NEIGHBORS: Python-side filter applied in extract_lle_ols (NOT a lyap_k flag)
 set M_MIN=3
-set M_MAX=3
+set M_MAX=10
+set M_PRIMARY=3
 set STEPS=500
+set ITER=100
 set MIN_NEIGHBORS=10
 REM ----------------------------------------------------------------------------
 
@@ -41,9 +47,11 @@ if /i "%TEST_MODE%"=="true" (
     set TMP_ROOT=%DATA_DIR%\results_test_%TEST_POINT_COUNT%
     set TEST_SUFFIX=_test%TEST_POINT_COUNT%
     set PLOT_SUFFIX= test%TEST_POINT_COUNT%
-    if not defined DCH_LYAP_STEPS set DCH_LYAP_STEPS=40
+    if not defined DCH_LYAP_STEPS set DCH_LYAP_STEPS=200
+    if not defined DCH_LYAP_ITERATIONS set DCH_LYAP_ITERATIONS=30
     if not defined DCH_LYAP_MIN_NEIGHBORS set DCH_LYAP_MIN_NEIGHBORS=3
     set STEPS=%DCH_LYAP_STEPS%
+    set ITER=%DCH_LYAP_ITERATIONS%
     set MIN_NEIGHBORS=%DCH_LYAP_MIN_NEIGHBORS%
     echo [INFO] TEST MODE - first %TEST_POINT_COUNT% lines per file
 ) else (
@@ -55,7 +63,9 @@ if /i "%TEST_MODE%"=="true" (
 )
 
 echo [INFO] Output root : %OUT_ROOT%
-echo [INFO] m range     : %M_MIN%..%M_MAX%   r=TISEAN defaults   reference_pts=%STEPS%   min_neighbors=%MIN_NEIGHBORS%
+echo [INFO] m range     : %M_MIN%..%M_MAX% (primary m=%M_PRIMARY%)   r=TISEAN defaults
+echo [INFO] lyap_k flags: -n%STEPS% reference points, -s%ITER% S(t) iterations
+echo [INFO] Python filter: min_neighbors=%MIN_NEIGHBORS%
 echo [INFO] Hypothesis  : %RUN_HYPOTHESIS%
 echo [INFO] Per-coin run:
 echo [INFO]   run2 = per-symbol (TAU_LLE_^<sym^>)
@@ -168,17 +178,19 @@ echo   Data file : !DATA_FILE!
 echo   Output dir: !OUT_DIR!
 echo   --------------------------------------------------
 
-echo   [1/2] lyap_k: Kantz S^(t^) divergence curves ^(-n%STEPS%, -s%MIN_NEIGHBORS%, -t!THEILER_W!^)...
-"%TISEAN%\lyap_k.exe" -d!TAU_DELAY! -m%M_MIN% -M%M_MAX% -t!THEILER_W! -n%STEPS% -s%MIN_NEIGHBORS% -o "!OUT_DIR!\!BASE!_lyap.txt" "!DATA_FILE!"
+echo   [1/2] lyap_k: Kantz S^(t^) divergence curves ^(m=%M_MIN%..%M_MAX%, -n%STEPS% ref pts, -s%ITER% iters, -t!THEILER_W!^)...
+"%TISEAN%\lyap_k.exe" -d!TAU_DELAY! -m%M_MIN% -M%M_MAX% -t!THEILER_W! -n%STEPS% -s%ITER% -o "!OUT_DIR!\!BASE!_lyap.txt" "!DATA_FILE!"
 if errorlevel 1 exit /b 1
 "%PYTHON_EXE%" %PYTHON_ARGS% "%PRINT_RESULTS%" lyap "!OUT_DIR!\!BASE!_lyap.txt"
 
 >> "%AGG_FILE%" echo !BASE!,!RUN_ID!,!TAU_DELAY!,!THEILER_W!,!OUT_DIR!\!BASE!_lyap.txt
 
-REM lyap_k writes one block per epsilon scan at fixed dim (#epsilon= ... dim= ...); not one block per m.
-echo   [2/2] plot: Kantz S^(t^) curves for each epsilon block ...
+REM lyap_k writes one block per (epsilon, dim) header (#epsilon= ... dim= ...).
+REM Across m=M_MIN..M_MAX with several epsilon scales, the output therefore has
+REM (m_count * eps_count) blocks. Plot all of them; m=%M_PRIMARY% is the active block.
+echo   [2/2] plot: Kantz S^(t^) curves across all (epsilon, m) blocks ...
 if /i "%HAS_GNUPLOT%"=="true" (
-    "%GNUPLOT_EXE%" -e "set terminal pngcairo size 1400,900 enhanced font 'Arial,12'; set output '!OUT_DIR!\!BASE!_lyap_St.png'; set title '!BASE! Kantz Lyapunov S(t), dim=%M_MIN%, tau=!TAU_DELAY!, W=!THEILER_W!!PLOT_SUFFIX!'; set xlabel 'iteration'; set ylabel 'S(t)'; set grid; set key outside; plot for [i=0:*] '!OUT_DIR!\!BASE!_lyap.txt' index i using 1:2 with lines lw 0.7 title sprintf('epsilon block %%d (m=%M_MIN%)', i)" > "!OUT_DIR!\gnuplot.log" 2>&1
+    "%GNUPLOT_EXE%" -e "set terminal pngcairo size 1400,900 enhanced font 'Arial,12'; set output '!OUT_DIR!\!BASE!_lyap_St.png'; set title '!BASE! Kantz Lyapunov S(t), m=%M_MIN%..%M_MAX% (primary m=%M_PRIMARY%), tau=!TAU_DELAY!, W=!THEILER_W!!PLOT_SUFFIX!'; set xlabel 'iteration t'; set ylabel 'S(t)'; set grid; set key outside font 'Arial,7' vertical maxrows 30; plot for [i=0:*] '!OUT_DIR!\!BASE!_lyap.txt' index i using 1:2 with lines lw 0.7 title sprintf('block %%d', i)" > "!OUT_DIR!\gnuplot.log" 2>&1
     "%PYTHON_EXE%" %PYTHON_ARGS% "%PRINT_RESULTS%" file "!OUT_DIR!\!BASE!_lyap_St.png"
 )
 echo(

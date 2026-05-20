@@ -14,7 +14,7 @@ from hypothesis_config import (
     RQA_RADIUS_PERCENTILE_DEFAULT,
 )
 from invariants_correlation import compute_ellner_from_c2, extract_takens_plateau
-from invariants_lyapunov import extract_lle_mean_std
+from invariants_lyapunov import extract_lle_ols
 from invariants_rqa import compute_percentile_radius, compute_pyrqa_metrics
 from tisean_io import run_c2t, run_d2, run_lyap_k
 
@@ -112,11 +112,12 @@ def compute_invariants(series_array, output_dir, label, delay, theiler,
             # Book mapping:
             #   run_lyap_k() estimates S(t), the averaged logarithmic divergence
             #   from (8.95), under the exponential-separation model (8.94).
-            #   extract_lle_mean_std() then finds the linear part of S(t) and
-            #   returns its slope as lambda_max.
+            #   extract_lle_ols() then finds the linear part of S(t), fits OLS
+            #   slope ± std_err on the best epsilon block, and returns lambda
+            #   with its OLS uncertainty.
             lyap_file = prefix + "_lyap.txt"
             run_lyap_k(data_file, delay, theiler, lyap_file)
-            mu, sg, nn = extract_lle_mean_std(lyap_file)
+            mu, sg, nn = extract_lle_ols(lyap_file)
             out["LLE"], out_std["LLE"] = mu, sg
             out_n["LLE"] = nn
         if need_rqa:

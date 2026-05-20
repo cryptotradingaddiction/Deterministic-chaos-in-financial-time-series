@@ -270,8 +270,9 @@ This section is the **method-first map**: each quantity used in the thesis pipel
 
 | Object | Math / book ref. | Code path |
 |--------|------------------|-----------|
-| Divergence curves $S(t)$ | Kantz / TISEAN `lyap_k` (eq. 8.94–8.95) | **TISEAN** `lyap_k.exe` via `tisean_io.run_lyap_k` (`-dτ -m3 -M3 -tW`); batch: `Lambda_max.bat` |
-| **LLE** | Median linear slope of $S(t)$ over usable $\varepsilon$-blocks at $m=3$ | `invariants_lyapunov.extract_lle_mean_std` ← `_parse_lyap_blocks` / `_best_linear_slope` → `compute_invariants` (`LLE`) |
+| Divergence curves $S(t)$ | Kantz / TISEAN `lyap_k` (eq. 8.94–8.95) | **TISEAN** `lyap_k.exe` via `tisean_io.run_lyap_k` (`-dτ -m3 -M3 -tW -n<ref_pts> -s<iters>`); batch: `Lambda_max.bat` sweeps `m=3..10` for diagnostic plots (`hypothesis_config.M_LYAP_DIAGNOSTIC_MAX`) |
+| Reference points / S(t) length | `lyap_k -n` / `-s` | `hypothesis_config.lyap_k_steps` (env `DCH_LYAP_STEPS`, default 500) and `lyap_k_iterations` (env `DCH_LYAP_ITERATIONS`, default 100) |
+| **LLE** | OLS slope of the highest-quality $\varepsilon$-block at $m=M_{\mathrm{LYAP}}=3$ | `invariants_lyapunov.extract_lle_ols` ← `_parse_lyap_blocks` / `_best_linear_slope_window` (returns `(slope, t_lo, t_hi, intercept, std_err)`); quality $= (t_{\mathrm{hi}}-t_{\mathrm{lo}})/\mathrm{std\_err}$ → `compute_invariants` (`LLE`, with `std_err` as primary uncertainty) |
 | LLE diagnostic plot | Visual check of linear region | `plot_lyap_k_output.plot_orig_lle_fit` (called from `hypothesis_cli.main` when `LLE` in metrics) |
 
 ---

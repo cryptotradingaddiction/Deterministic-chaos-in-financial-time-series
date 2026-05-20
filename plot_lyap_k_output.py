@@ -228,8 +228,11 @@ def plot_orig_lle_fit(lyap_path: str, out_png: str, title: str | None = None) ->
         best_blk, best_slope = min(pairs, key=lambda p: abs(p[1] - lle))
         data = best_blk["data"]
         
-        # Calculate the exact window (start and end times) where the linear fit was applied
-        slope_w, t0, t1, intercept = _best_linear_slope_window(data[:, 0], data[:, 1])
+        # Calculate the exact window (start and end times) where the linear fit was applied.
+        # The 5th return value (OLS std_err of slope) is unused here.
+        slope_w, t0, t1, intercept, _std_err = _best_linear_slope_window(
+            data[:, 0], data[:, 1]
+        )
         
         if np.isfinite(slope_w) and np.isfinite(t0) and np.isfinite(t1) and np.isfinite(intercept):
             # Generate points to draw the linear fit line

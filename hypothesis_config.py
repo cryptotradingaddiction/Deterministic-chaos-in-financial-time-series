@@ -32,27 +32,75 @@ M_D2 = 3
 # d2.exe runs over m = 1 .. D2_DIAGNOSTIC_M_MAX. Used by tisean_io.run_d2 (-M1,X)
 # and matched by correlation_dimension.bat (EMBED=1,X) so plots cover all m.
 D2_DIAGNOSTIC_M_MAX = 10
+# Active Lyapunov embedding dimension. lyap_k sweeps m = M_LYAP .. M_LYAP_DIAGNOSTIC_MAX
+# in the .bat path (single per-coin run), but the OLS slope estimate and TS test
+# always use the m = M_LYAP block. Multi-m blocks are kept for the gnuplot panels
+# that show m-independence of the linear S(t) region.
 M_LYAP = 3
+M_LYAP_DIAGNOSTIC_MAX = 10
 MIN_LYAP_LINEAR_POINTS = 3  # was 5; financial S(t) linear region is ~1-2 iterations
 MIN_LYAP_NEIGHBORS = 10
-# Short-series test mode (DCH_TEST_MODE): lyap_k -n / -s overrides via env.
-DEFAULT_DCH_LYAP_STEPS_TEST = 40
+# Short-series test mode (DCH_TEST_MODE) lyap_k overrides via env.
+DEFAULT_DCH_LYAP_STEPS_TEST = 200       # -n reference points (was 40 — see lyap_k_steps)
+DEFAULT_DCH_LYAP_ITERATIONS_TEST = 30   # -s iterations / S(t) curve length
 DEFAULT_DCH_LYAP_MIN_NEIGHBORS_TEST = 3
+DEFAULT_LYAP_ITERATIONS = 100           # production -s default (S(t) curve length)
+
+
+def _is_test_mode_env() -> bool:
+    return os.environ.get("DCH_TEST_MODE", "").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
 
 
 def lyap_k_steps() -> int:
-    """Iteration count for lyap_k ``-n`` (env ``DCH_LYAP_STEPS``, default 500)."""
+    """Reference points for ``lyap_k -n`` (env ``DCH_LYAP_STEPS``).
+
+    TISEAN's ``-n`` is the *number of reference points* used to average S(t)
+    over the trajectory, not the curve length. See :func:`lyap_k_iterations`
+    for the ``-s`` curve length.
+
+    Defaults: 500 in production, 200 in ``DCH_TEST_MODE=true`` (short series).
+    """
     raw = os.environ.get("DCH_LYAP_STEPS", "").strip()
     if raw:
         try:
             return max(5, int(float(raw)))
         except ValueError:
             pass
-    return 500
+    return DEFAULT_DCH_LYAP_STEPS_TEST if _is_test_mode_env() else 500
+
+
+def lyap_k_iterations() -> int:
+    """Forward iterations for ``lyap_k -s`` (env ``DCH_LYAP_ITERATIONS``).
+
+    ``-s`` controls the length of the Kantz S(t) curve. A previous version of
+    this project incorrectly passed the per-Python neighbor floor here, which
+    truncated S(t) to ~10 points and made the linear region undetectable.
+
+    Defaults: 100 in production, 30 in ``DCH_TEST_MODE=true`` (short series).
+    Test mode runs typically have N≈100 phase-space points after embedding;
+    asking for ``-s 100`` then fails inside lyap_k (insufficient trajectory).
+    """
+    raw = os.environ.get("DCH_LYAP_ITERATIONS", "").strip()
+    if raw:
+        try:
+            return max(5, int(float(raw)))
+        except ValueError:
+            pass
+    return (
+        DEFAULT_DCH_LYAP_ITERATIONS_TEST
+        if _is_test_mode_env()
+        else DEFAULT_LYAP_ITERATIONS
+    )
 
 
 def lyap_min_neighbors() -> int:
-    """Minimum neighbours for LLE block filter (env ``DCH_LYAP_MIN_NEIGHBORS``)."""
+    """Minimum neighbours for LLE block filter (env ``DCH_LYAP_MIN_NEIGHBORS``).
+
+    Applied in Python (``invariants_lyapunov.extract_lle_ols``) after parsing
+    lyap_k output. **Not** a lyap_k CLI flag.
+    """
     raw = os.environ.get("DCH_LYAP_MIN_NEIGHBORS", "").strip()
     if raw:
         try:

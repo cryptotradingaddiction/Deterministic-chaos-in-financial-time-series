@@ -12,8 +12,8 @@ from hypothesis_config import (
     D2_PAIR_LIMIT,
     M_D2,
     M_LYAP,
+    lyap_k_iterations,
     lyap_k_steps,
-    lyap_min_neighbors,
 )
 from surrogate_sampling import load_series_1d
 
@@ -113,12 +113,20 @@ def run_c2t(c2_file, output_file):
 
 
 def run_lyap_k(data_file, delay, theiler, output_file):
-    # Kantz / largest-Lyapunov setup (matches Lambda_max.bat):
+    # Kantz / largest-Lyapunov setup (must mirror Lambda_max.bat for orig):
     #
-    #   lyap_k -d<tau> -m3 -M3 -t<W> -n500 -s10 -o <out> <data>
+    #   lyap_k -d<tau> -m3 -M3 -t<W> -n<ref_pts> -s<iterations> -o <out> <data>
     #
-    # TISEAN excludes pairs with |i-j| <= W (strict > W for inclusion), same as
-    # d2.exe -t. ``theiler`` is the per-coin W_D2_<sym> from theilers_w.bat.
+    # In Python this is the bootstrap / reference-series path, so we always
+    # restrict to m = M_LYAP (single block) to keep per-bootstrap cost low.
+    # Multi-m diagnostics live in the .bat path only.
+    #
+    # ``-n`` = number of reference points used to average S(t).
+    # ``-s`` = number of forward iterations (length of S(t)). Previously this
+    # flag accidentally received the Python neighbor floor, which collapsed
+    # S(t) to ~10 points and made the linear region undetectable.
+    # ``theiler`` is the per-coin W_D2_<sym> from theilers_w.bat;
+    # TISEAN excludes pairs with |i-j| <= W (strict > W for inclusion).
     try:
         w_eff = max(0, int(theiler))
     except (TypeError, ValueError):
@@ -132,7 +140,7 @@ def run_lyap_k(data_file, delay, theiler, output_file):
         "-n",
         str(lyap_k_steps()),
         "-s",
-        str(lyap_min_neighbors()),
+        str(lyap_k_iterations()),
         "-o",
         output_file,
         data_file,

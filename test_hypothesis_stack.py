@@ -134,6 +134,11 @@ def _run_hypothesis_cli(data_file: Path, metrics: str, extra: list[str], out_dir
     ]
     env = os.environ.copy()
     env["PATH"] = str(TISEAN_BIN) + os.pathsep + env.get("PATH", "")
+    # The smoke test always runs on a 100-row slice, so propagate DCH_TEST_MODE
+    # to the subprocess. Without it lyap_k_steps / lyap_k_iterations use the
+    # production defaults (500 / 100), which lyap_k.exe rejects on short series.
+    env.setdefault("DCH_TEST_MODE", "true")
+    env.setdefault("DCH_TEST_POINTS", str(TEST_POINTS))
     subprocess.check_call(cmd, cwd=str(ROOT), env=env)
     summary = out_dir / "BTCUSD_surrogate_summary.txt"
     if not summary.is_file():

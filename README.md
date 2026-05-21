@@ -1012,7 +1012,9 @@ For each original log-return series, `hypothesis.py` constructs:
 2. `normal` — $\mathcal{N}(\mu_r, \sigma_r)$ series of the same length,
 3. `t3.5` — Student-$t$ reference with $\nu=3.5$, scaled to $(\mu_r, \sigma_r)$.
 
-The permutation keeps the marginal mean/SD identical to the original series but destroys temporal order. The Gaussian and Student-t references are reported as descriptive benchmarks, not as the main test pair.
+The permutation keeps the marginal mean/SD identical to the original series but destroys temporal order. The Gaussian and Student-t references are reported as **Step-0 descriptive benchmarks**, not as the main test pair — the formal TS rejection rule below uses only the bootstrap centre/SD vs. the reshuffle value.
+
+**Invariants are computed on every reference series**, not just `surr`. For each metric in the active scope (TAKENS / ELLNER / LLE / RQA-when-bootstrap-on), `compute_invariants` runs once per label `(orig, surr, normal, t3.5)` plus $B$ times for the stationary bootstrap. Every per-coin `<BASE>_surrogate_summary.txt` therefore lists the invariant value on the original series and on all three reference series side-by-side. After all per-coin runs, `print_results.py boot_aggregate` emits the same columns into `_hypothesis_aggregate_summary.txt` (`<metric>_orig`, `<metric>_boot`, `<metric>_boot_sd`, `<metric>_resh`, **`<metric>_normal`**, **`<metric>_t3.5`**, `TS_<metric>`, `absTS_<metric>`), and `documents.py` carries them into the Word table "Výsledky surrogate testů" with explicit **normal** and **t3.5** columns alongside `reshuffle`.
 
 &nbsp;
 &nbsp;

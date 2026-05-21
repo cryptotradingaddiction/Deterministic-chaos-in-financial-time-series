@@ -119,8 +119,12 @@ def _parse_agg_col(path: Path, col_index: int, decimals: int = 4, as_int: bool =
     """
     Parse whitespace-separated aggregate files by **column index** (0-based after symbol).
 
-    Used for legacy summaries without a ``Symbol ...`` header row.
+    Used for legacy summaries without a ``Symbol ...`` header row. Returns an
+    empty dict if the file is missing so partial pipeline runs still build a
+    (best-effort) Word document.
     """
+    if not path.is_file():
+        return {}
     txt = path.read_text(encoding="utf-8", errors="ignore")
     out: dict[str, str] = {}
     for line in txt.splitlines():
@@ -142,7 +146,12 @@ def _parse_agg_named_col(path: Path, col_name: str, decimals: int = 4, as_int: b
     Parse ``_hypothesis_aggregate_summary.txt``-style files by **column name**.
 
     Expects a header line starting with ``Symbol ``; data rows start with a known sym.
+    Returns an empty dict if the aggregate file is missing (e.g. the user has
+    only run a subset of the invariant batches), so the Word document still
+    builds with empty cells in the missing column.
     """
+    if not path.is_file():
+        return {}
     txt = path.read_text(encoding="utf-8", errors="ignore")
     header: list[str] | None = None
     out: dict[str, str] = {}
@@ -178,7 +187,13 @@ def _format_float_token(token: str, decimals: int = 4) -> str:
 
 
 def _parse_aggregate_rows(path: Path) -> tuple[list[str], dict[str, dict[str, str]]]:
-    """Return (header_names, {symbol: {col_name: token}}) from a hypothesis aggregate file."""
+    """Return (header_names, {symbol: {col_name: token}}) from a hypothesis aggregate file.
+
+    Returns ``([], {})`` when the aggregate file is missing so the caller can
+    still emit per-coin rows with empty / nan cells for that family.
+    """
+    if not path.is_file():
+        return [], {}
     txt = path.read_text(encoding="utf-8", errors="ignore")
     header: list[str] = []
     rows: dict[str, dict[str, str]] = {}
@@ -198,7 +213,13 @@ def _parse_aggregate_rows(path: Path) -> tuple[list[str], dict[str, dict[str, st
 
 @dataclass
 class SurrogateRow:
-    """One row in the surrogate/bootstrap results table (per coin × invariant)."""
+    """One row in the surrogate/bootstrap results table (per coin × invariant).
+
+    ``normal`` and ``t_ref`` carry the invariant value computed on the matched
+    Gaussian / Student-t reference series (not their TS statistics — they share
+    the bootstrap denominator with ``resh``). Empty / NaN when the upstream
+    aggregate is from an older format that did not emit those columns.
+    """
 
     symbol: str
     invariant: str
@@ -206,6 +227,8 @@ class SurrogateRow:
     boot_mean: str
     boot_sd: str
     resh: str
+    normal: str
+    t_ref: str
     ts: str
     abs_ts: str
     decision: str
@@ -266,6 +289,11 @@ def _collect_surrogate_rows(config=None) -> list[SurrogateRow]:
                     boot_mean=_format_float_token(row.get(f"{metric}_boot", "nan")),
                     boot_sd=_format_float_token(row.get(f"{metric}_boot_sd", "nan")),
                     resh=_format_float_token(row.get(f"{metric}_resh", "nan")),
+                    # New: invariant values on the matched reference series.
+                    # The aggregate writes them as `<metric>_normal` and
+                    # `<metric>_t3.5` (see print_results.cmd_boot_aggregate).
+                    normal=_format_float_token(row.get(f"{metric}_normal", "nan")),
+                    t_ref=_format_float_token(row.get(f"{metric}_t3.5", "nan")),
                     ts=_format_float_token(row.get(f"TS_{metric}", "nan")),
                     abs_ts=abs_ts,
                     decision=_bootstrap_decision(abs_ts),
@@ -605,13 +633,17 @@ def write_doc(data: TableData) -> None:
         "nikoli důkaz chaosu. Test je k dispozici pro TAKENS, ELLNER, LLE a (při zapnutém "
         "RQA bootstrapu v ``RQA.bat``) pro skalární RQA metriky; prázdné nebo ``nan`` buňky "
         "znamenají ``insufficient data`` nebo vypnutý bootstrap. "
+        "Sloupce **normal** a **t3.5** uvádějí hodnotu téhož invariantu spočtenou na referenčních "
+        "řadách: Gaussova řada N(μ_r, σ_r) a Studentova t-řada s ν=3.5, obě s délkou jako originál "
+        "a stejnými prvními dvěma momenty. Slouží jako Step-0 srovnání: orig vs. nezávislé šumové "
+        "modely; formální TS rozhodnutí se nicméně počítá pouze z reshuffle vs. bootstrap. "
         "Parametry embedování (τ, m) a Theilerovo okno W vstupují do ``hypothesis.py`` jako "
         "``--delay`` a ``--theiler`` (stejné W jako v TISEAN dávkových skriptech a PyRQA)."
     )
 
     sur_headers = [
         "Aktivum", "Invariant", "orig", "boot_mean", "boot_sd",
-        "reshuffle", "TS", "|TS|", "Rozhodnutí",
+        "reshuffle", "normal", "t3.5", "TS", "|TS|", "Rozhodnutí",
     ]
     sur_table = doc.add_table(rows=1, cols=len(sur_headers))
     sur_table.style = "Table Grid"
@@ -627,6 +659,8 @@ def write_doc(data: TableData) -> None:
             row.boot_mean,
             row.boot_sd,
             row.resh,
+            row.normal,
+            row.t_ref,
             row.ts,
             row.abs_ts,
             row.decision,
@@ -634,7 +668,12 @@ def write_doc(data: TableData) -> None:
         for i, value in enumerate(vals):
             _set_cell_text(cells[i], value, font_size=7.0)
 
-    _format_table(sur_table, [0.75, 0.95, 0.82, 0.82, 0.82, 0.82, 0.82, 0.82, 1.25], font_size=7.0)
+    _format_table(
+        sur_table,
+        # 11 columns; widths sum to ~ 9.4 inches (fits landscape A4 with margins).
+        [0.65, 0.90, 0.72, 0.78, 0.72, 0.72, 0.72, 0.72, 0.72, 0.72, 1.20],
+        font_size=7.0,
+    )
 
     # --- Table 3: input series μ, σ (not invariant SDs) ---
     doc.add_paragraph("")

@@ -836,18 +836,23 @@ def cmd_boot_aggregate(path, _n=None):
             fh.write("=" * 110 + "\n\n")
 
             w = 11
+            # NB: keep the `normal` and `t3.5` invariant columns next to the
+            # existing reshuffle column so downstream documents.py can pull
+            # the full Step-0 reference comparison from a single aggregate row.
             header = f"{'Symbol':<8} {'tau':>4} {'W':>3} {'B':>3}"
             for name in metric_names:
                 if is_stationary:
                     header += (
                         f" {f'{name}_orig':>{w}} {f'{name}_boot':>{w}}"
                         f" {f'{name}_boot_sd':>{w}} {f'{name}_resh':>{w}}"
+                        f" {f'{name}_normal':>{w}} {f'{name}_t3.5':>{w}}"
                         f" {f'TS_{name}':>{w}} {f'absTS_{name}':>{w}}"
                     )
                 else:
                     header += (
                         f" {f'{name}_orig':>{w}} {f'{name}_orig_sd':>{w}}"
                         f" {f'{name}_surr':>{w}} {f'{name}_surr_sd':>{w}}"
+                        f" {f'{name}_normal':>{w}} {f'{name}_t3.5':>{w}}"
                         f" {f'F_{name}':>{w}} {f'p_{name}':>{w}}"
                     )
             header += f" {'rej_all':>7}"
@@ -859,18 +864,25 @@ def cmd_boot_aggregate(path, _n=None):
                 for name in metric_names:
                     m = info["metrics"].get(name)
                     if not m:
-                        row += f" {'nan':>{w}} {'nan':>{w}} {'nan':>{w}} {'nan':>{w}} {'nan':>{w}} {'nan':>{w}}"
+                        row += (
+                            f" {'nan':>{w}} {'nan':>{w}} {'nan':>{w}} {'nan':>{w}}"
+                            f" {'nan':>{w}} {'nan':>{w}} {'nan':>{w}} {'nan':>{w}}"
+                        )
                         continue
+                    normal_val = m.get('normal', float('nan'))
+                    tref_val = m.get('t_ref', float('nan'))
                     if is_stationary:
                         row += (
                             f" {m['orig']:>{w}.4f} {m.get('boot_mean', float('nan')):>{w}.4f}"
                             f" {m.get('boot_sd', float('nan')):>{w}.4f} {m.get('resh', float('nan')):>{w}.4f}"
+                            f" {normal_val:>{w}.4f} {tref_val:>{w}.4f}"
                             f" {m.get('TS', float('nan')):>{w}.4f} {m.get('abs_TS', float('nan')):>{w}.4f}"
                         )
                     else:
                         row += (
                             f" {m['orig']:>{w}.4f} {m['std_orig']:>{w}.4f}"
                             f" {m['mean']:>{w}.4f} {m['std']:>{w}.4f}"
+                            f" {normal_val:>{w}.4f} {tref_val:>{w}.4f}"
                             f" {m['F']:>{w}.4f} {m['pvalue']:>{w}.4f}"
                         )
                 rej_all = (

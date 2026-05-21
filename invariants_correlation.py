@@ -110,11 +110,40 @@ def select_plateau_values(rows, min_points=MIN_PLATEAU_POINTS,
                 best_ij = (i, j)
 
     i, j = best_ij
-    if i == i_lo or j == i_hi:
+    # The warning below is informational, not an error. It fires when the
+    # plateau picker latched onto a window that abuts the lower or upper
+    # boundary of the *interior* search region (interior = grid minus the
+    # ``edge_margin`` samples at each end). The two failure modes have very
+    # different physical interpretations:
+    #
+    #   * lower edge (small ε):  the chosen plateau sits in the discretization
+    #     / noise floor of C(r). The "flat" segment is most likely an artefact
+    #     of finite N and the data probably has no true scaling region at the
+    #     smallest scales. Consider lengthening the series, lowering noise,
+    #     or rerunning d2/c2t with a larger lower bound (-r0).
+    #
+    #   * upper edge (large ε):  the chosen plateau touches the saturation
+    #     plateau of C(r) where the attractor is "full". This is rarely a
+    #     true scaling region; consider rerunning d2/c2t with a smaller -R.
+    #
+    # Both cases mean the *true* scaling region likely extends beyond what
+    # the current d2 grid sampled.
+    if i == i_lo and j == i_hi:
+        edge_descr = "both edges of the interior (lower=small ε AND upper=large ε)"
+    elif i == i_lo:
+        edge_descr = "lower edge of the interior (smallest-ε noise floor)"
+    elif j == i_hi:
+        edge_descr = "upper edge of the interior (largest-ε saturation region)"
+    else:
+        edge_descr = None
+    if edge_descr is not None:
         logger.warning(
-            "select_plateau_values: optimum touches search edge "
-            "(i=%d, j=%d, i_lo=%d, i_hi=%d, n=%d) — scaling may extend "
-            "beyond the d2 grid.", i, j, i_lo, i_hi, n,
+            "select_plateau_values: optimum touches %s — "
+            "scaling region may extend beyond the d2 grid "
+            "(window=[%d,%d), interior=[%d,%d), n=%d, "
+            "r=[%.6g, %.6g]).",
+            edge_descr, i, j, i_lo, i_hi, n,
+            float(eps_sorted[i]), float(eps_sorted[j - 1]),
         )
     return y[i:j], float(eps_sorted[i]), float(eps_sorted[j - 1])
 

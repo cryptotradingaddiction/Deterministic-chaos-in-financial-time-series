@@ -198,13 +198,29 @@ def _ellner_from_c2(c2_path, r_min, r_max, dim=3):
     return float((c_max - c_min) / integral)
 
 
-def _saturation(values, last_k=5):
+# The diagnostic per-m tables sweep m = 1..M_MAX (M_MAX = 10 in the live
+# pipeline). The "saturation" indicator looks at the *tail* of that sweep
+# because invariants of a deterministic attractor approach a constant as
+# m grows past the true embedding dimension. We summarise the tail with the
+# median over the last ``SATURATION_TAIL`` m-values, which is robust to a
+# single noisy point near the upper edge.
+SATURATION_TAIL = 5
+
+
+def _saturation(values, last_k=SATURATION_TAIL):
+    """Return (median_of_tail, tail_start_idx, tail_end_idx) over ``values``.
+
+    The returned indices are 0-based positions inside the finite-filtered
+    ``values`` array so callers can translate them back to the corresponding
+    embedding dimension. ``tail_end_idx`` is inclusive.
+    """
     a = np.asarray(values, dtype=float)
-    a = a[np.isfinite(a)]
-    if a.size == 0:
-        return float("nan")
-    take = a[-last_k:] if a.size >= last_k else a
-    return float(np.median(take))
+    finite = np.isfinite(a)
+    if not finite.any():
+        return float("nan"), -1, -1
+    idx = np.where(finite)[0]
+    tail = idx[-last_k:] if idx.size >= last_k else idx
+    return float(np.median(a[tail])), int(tail[0]), int(tail[-1])
 
 
 def _slope_fit(x, y, lo=2, hi=10):
@@ -253,15 +269,37 @@ def _per_m_table(label, blocks, m_start, value_col=1, value_label=None, saturati
         value_label = label[:10]
     print(f"  {'m':>4}  {value_label[:18]:>18}  {'pts':>5}")
     plateaus = []
+    m_values = []
     for i, b in enumerate(blocks, start=m_start):
         if b.ndim < 2 or b.shape[1] <= value_col:
             continue
         v = _plateau(b, value_col=value_col)
         plateaus.append(v)
+        m_values.append(int(i))
         print(f"  {i:>4}  {v:>18.4f}  {b.shape[0]:>5}")
-    sat = _saturation(plateaus)
+    sat, tail_lo, tail_hi = _saturation(plateaus)
+    # Translate the saturation tail back to the actual m sweep so the log
+    # cannot be misread as "we only used 5 dimensions". Example output:
+    #   "saturation indicator (median over last 5 m = 6..10 of the m=1..10 sweep): 7.3761"
+    if tail_lo < 0 or not m_values:
+        tail_descr = "no finite m"
+        m_lo_descr = m_hi_descr = "?"
+    else:
+        m_lo_descr = str(m_values[tail_lo])
+        m_hi_descr = str(m_values[tail_hi])
+        tail_descr = f"m={m_lo_descr}..{m_hi_descr}"
+    full_descr = f"m={m_values[0]}..{m_values[-1]}" if m_values else "empty"
+    tail_n = (tail_hi - tail_lo + 1) if tail_lo >= 0 else 0
     if saturation_label is None:
-        saturation_label = "saturation estimate (median of last 5 m)"
+        saturation_label = (
+            f"saturation indicator (median over last {tail_n} m "
+            f"= {tail_descr} of the {full_descr} sweep)"
+        )
+    else:
+        saturation_label = (
+            f"{saturation_label} (last {tail_n} m = {tail_descr} "
+            f"of the {full_descr} sweep)"
+        )
     print(f"  {saturation_label}: {sat:.4f}")
 
 
@@ -273,7 +311,7 @@ def cmd_d2(path, _n=None):
         read_blocks(path),
         m_start=1,
         value_label="D2 plateau",
-        saturation_label="diagnostic median of last 5 m",
+        saturation_label="diagnostic saturation indicator",
     )
 
 
@@ -290,7 +328,7 @@ def cmd_takens(path, _n=None):
         blocks,
         m_start=1,
         value_label="Takens D_T",
-        saturation_label="Takens median of last 5 m",
+        saturation_label="Takens saturation indicator",
     )
     if len(blocks) >= 3:
         vals, r_min, r_max = _stable_plateau_values(blocks[2], value_col=1)
@@ -390,13 +428,26 @@ def cmd_lyap(path, _n=None):
     print("  Diagnostic lyap_k slopes (first epsilon block per m; hypothesis LLE uses OLS slope of the highest-quality block via extract_lle_ols):")
     print(f"  {'m':>4}  {'lambda':>10}  {'pts':>5}")
     lambdas = []
+    m_values = []
     for m in sorted(by_dim.keys()):
         b = by_dim[m]
         lam = _slope_fit(b[:, 0], b[:, 1])
         lambdas.append(lam)
+        m_values.append(int(m))
         print(f"  {m:>4}  {lam:>10.5f}  {b.shape[0]:>5}")
-    sat = _saturation(lambdas)
-    print(f"  diagnostic lambda summary (median of last 5 m): {sat:.5f}")
+    sat, tail_lo, tail_hi = _saturation(lambdas)
+    if tail_lo < 0 or not m_values:
+        descr = "no finite m"
+        tail_n = 0
+    else:
+        descr = f"m={m_values[tail_lo]}..{m_values[tail_hi]}"
+        tail_n = tail_hi - tail_lo + 1
+    full = f"m={m_values[0]}..{m_values[-1]}" if m_values else "empty"
+    print(
+        f"  diagnostic lambda saturation indicator "
+        f"(median over last {tail_n} m = {descr} of the {full} sweep): "
+        f"{sat:.5f}"
+    )
 
 
 def cmd_rec(path, _n=None):

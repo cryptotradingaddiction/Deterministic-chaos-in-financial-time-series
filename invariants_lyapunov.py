@@ -300,6 +300,10 @@ def extract_lle_ols(lyap_file, min_neighbors=None, dim=None):
     The median and spread of slopes across all usable blocks are also logged
     at INFO level as a robustness check (not the primary uncertainty).
     """
+    # Resolve ``dim`` locally so the INFO log below can quote the actual
+    # embedding dimension even when callers pass ``dim=None``.
+    if dim is None:
+        dim = M_LYAP
     best, candidates = find_best_lle_block(
         lyap_file, min_neighbors=min_neighbors, dim=dim,
     )
@@ -310,13 +314,19 @@ def extract_lle_ols(lyap_file, min_neighbors=None, dim=None):
     all_slopes = np.array([c[1] for c in candidates], dtype=float)
     median_slope = float(np.median(all_slopes))
     spread = float(np.std(all_slopes, ddof=1)) if all_slopes.size > 1 else 0.0
+    # The robustness check varies the length-scale ε at fixed embedding
+    # dimension `dim` (default m = M_LYAP = 3) — *not* the dimension.
+    # The wording "ε-blocks at m=…" makes it explicit that we are not
+    # sweeping the embedding axis here; `extract_lle_ols` is called once
+    # per series at the hypothesis m. Embedding-dimension sweeps live in
+    # the diagnostic m = 1..M_MAX table emitted by ``print_results lyap``.
     logger.info(
         "lle ols: best eps=%.6g slope=%.6g +/- %.3g "
         "(window t=[%.3g,%.3g], quality=%.3g); "
-        "median across %d blocks = %.6g, spread = %.3g",
+        "median across %d ε-blocks at m=%d = %.6g, spread = %.3g",
         best_eps, best_slope, best_std_err,
         best_t_lo, best_t_hi, best_quality,
-        len(candidates), median_slope, spread,
+        len(candidates), int(dim), median_slope, spread,
     )
 
     return float(best_slope), float(best_std_err), int(len(candidates))

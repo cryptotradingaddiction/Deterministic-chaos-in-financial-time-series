@@ -30,10 +30,36 @@ import sys
 
 import numpy as np
 
+# Shared plateau detector. Importing the canonical implementation keeps the
+# d2/Takens diagnostics in this script in lock-step with the live hypothesis
+# path (``hypothesis_cli`` / ``compute_invariants``). The previous in-file
+# mirror was a deliberate verbatim copy and tended to drift on each scoring
+# tweak (length weight, edge margin, ...).
+from invariants_correlation import select_plateau_values
+
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 except Exception:
     pass
+
+
+def _parse_float_tok(s):
+    """Coerce one whitespace-delimited token into a float (nan/inf-tolerant).
+
+    Used by every summary-row regex parser in this module: the v3..v5 layouts
+    all serialise NaN/Inf as the strings ``nan``, ``inf``, ``+inf``, ``-inf``,
+    which ``float(...)`` would still accept but not consistently across
+    platforms. Centralising the helper at module scope avoids the previous
+    duplicate inner definitions in ``_parse_bootstrap_summary``.
+    """
+    sl = (s or "").strip().lower()
+    if sl == "nan":
+        return float("nan")
+    if sl in ("inf", "+inf"):
+        return float("inf")
+    if sl == "-inf":
+        return float("-inf")
+    return float(s)
 
 
 def _safe_size(path):
@@ -109,56 +135,19 @@ def read_tagged_block(path, dim=3, tag="#dim"):
     return np.array(rows, dtype=float)
 
 
-def _stable_plateau_values(block, value_col=1, min_points=8, edge_margin=2):
-    """Return ``(y_values, r_min, r_max)`` for the best plateau window.
+def _stable_plateau_values(block, value_col=1):
+    """Best plateau window of ``block[:, value_col]`` vs ``ln block[:, 0]``.
 
-    Mirrors :func:`invariants_correlation.select_plateau_values` so the
-    boot_aggregate / takens_value / ellner_plot_data outputs stay in sync with
-    the live hypothesis pipeline. See that function for parameter semantics.
+    Thin adapter over :func:`invariants_correlation.select_plateau_values` so
+    multi-column TISEAN outputs (e.g. ``.d2`` has columns ``[r, slope, ...]``)
+    can be reduced to the canonical two-column ``(epsilon, value)`` array
+    expected by the shared detector.
     """
     b = np.asarray(block, dtype=float)
     if b.size == 0 or b.ndim < 2 or b.shape[1] <= value_col:
         return np.array([], dtype=float), float("nan"), float("nan")
-    eps = b[:, 0]
-    values = b[:, value_col]
-    mask = np.isfinite(eps) & np.isfinite(values) & (eps > 0.0) & (values > 0.0)
-    eps = eps[mask]
-    values = values[mask]
-    if values.size == 0:
-        return np.array([], dtype=float), float("nan"), float("nan")
-    order = np.argsort(np.log(eps))
-    eps_sorted = eps[order]
-    x = np.log(eps_sorted)
-    y = values[order]
-    n = y.size
-    if n < min_points:
-        return np.array([], dtype=float), float("nan"), float("nan")
-    eff_margin = max(0, int(edge_margin))
-    if n - 2 * eff_margin < min_points:
-        eff_margin = max(0, (n - min_points) // 2)
-    i_lo = eff_margin
-    i_hi = n - eff_margin
-    interior = max(1, i_hi - i_lo)
-    best_score = -np.inf
-    best_ij = (i_lo, i_hi)
-    for i in range(i_lo, i_hi - min_points + 1):
-        for j in range(i + min_points, i_hi + 1):
-            xs = x[i:j]
-            ys = y[i:j]
-            mean_abs = abs(float(np.mean(ys))) + 1e-12
-            try:
-                slope, _ = np.polyfit(xs, ys, 1)
-            except Exception:
-                continue
-            rel_slope = abs(float(slope)) / mean_abs
-            rel_sd = float(np.std(ys, ddof=1)) / mean_abs if ys.size > 1 else float("inf")
-            length_bonus = np.sqrt((j - i) / interior)
-            score = 0.5 * length_bonus - rel_slope - rel_sd
-            if score > best_score:
-                best_score = score
-                best_ij = (i, j)
-    i, j = best_ij
-    return y[i:j], float(eps_sorted[i]), float(eps_sorted[j - 1])
+    rows = np.column_stack([b[:, 0], b[:, value_col]])
+    return select_plateau_values(rows)
 
 
 def _plateau(block, value_col=1):
@@ -462,16 +451,6 @@ def _parse_bootstrap_summary(path):
     except OSError:
         return None
 
-    def _parse_float_tok(s):
-        sl = (s or "").strip().lower()
-        if sl == "nan":
-            return float("nan")
-        if sl in ("inf", "+inf"):
-            return float("inf")
-        if sl == "-inf":
-            return float("-inf")
-        return float(s)
-
     # Current hypothesis.py format: stationary-bootstrap TS test for TAKENS/ELLNER/LLE.
     m = re.search(r"Stationary-bootstrap hypothesis test\s+\(([^)]+)\)", text)
     if m:
@@ -647,15 +626,6 @@ def _parse_bootstrap_summary(path):
         r"^(?P<name>\S+)\s+(?P<orig>-?\d+\.\d+)\s+(?P<mean>-?\d+\.\d+)\s*\+\-\s*"
         r"(?P<std>-?\d+\.\d+)\s+(?P<score>-?\d+\.\d+)\s*$"
     )
-    def _parse_float_tok(s):
-        sl = (s or "").strip().lower()
-        if sl == "nan":
-            return float("nan")
-        if sl in ("inf", "+inf"):
-            return float("inf")
-        if sl == "-inf":
-            return float("-inf")
-        return float(s)
 
     def _fill_metric_row(info, name, orig, std_orig, mean, std, se_surr, zs, zse, pvalue, decision):
         info["metrics"][name] = {

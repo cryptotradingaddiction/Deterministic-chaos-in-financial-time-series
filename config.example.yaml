@@ -1,6 +1,10 @@
 paths:
-  # Main project data directory used by scripts.
-  data_dir: "C:\\DCh\\data"
+  # Main project data directory used by scripts. Relative paths are resolved
+  # against the repository root, so the defaults work after a fresh
+  # ``git clone`` without editing this file. Override with an absolute path
+  # (e.g. ``"D:/datasets/dch"``) when data lives outside the project.
+  data_dir: "data"
+  results_dir: "data/results"
 
 download:
   # Optional global start date override for crypto_data_all.py.

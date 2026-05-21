@@ -17,7 +17,7 @@ def stationary_bootstrap_samples(
     original: np.ndarray,
     n_samples: int,
     mean_block_length: float | None = None,
-    seed: int | None = None,
+    seed=None,
 ) -> list[np.ndarray]:
     """Generate stationary-bootstrap pseudo-series.
 
@@ -26,6 +26,11 @@ def stationary_bootstrap_samples(
     probability p = 1 / mean_block_length; otherwise the source index advances
     by one modulo n. If `mean_block_length` is not supplied, sqrt(n) is used as
     a conservative data-dependent default.
+
+    ``seed`` is forwarded verbatim to :func:`numpy.random.default_rng`, so any
+    of ``None``, an ``int``, a ``SeedSequence`` or a ``BitGenerator`` is
+    accepted. ``hypothesis_cli`` passes a spawned ``SeedSequence`` so the
+    bootstrap stream is independent of the surrogate stream.
     """
     arr = np.asarray(original, dtype=float).ravel()
     n = len(arr)

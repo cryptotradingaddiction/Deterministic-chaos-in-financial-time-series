@@ -21,6 +21,7 @@ from config_loader import (
     get_data_dir,
     get_results_dir,
     ensure_dir,
+    pipeline_logreturn_files,
     prefer_liquidity_cut,
     tau_for_symbol_from_mutual,
 )
@@ -137,18 +138,23 @@ def calculate_for_m(m, data, tau, d_max):
     distance_m_plus_1 = np.maximum(nn_distance, abs_diff_new)
     
     # ----- STEP 4: CALCULATION OF INDICATORS a_i(m) -----
-    # This is equation (8.43) or the very core of the deterministic part. 
-    # We divide the distance in (m+1) by the distance in (m). If the points move sharply away 
-    # from each other, it means they were false neighbors.
+    # Equation (8.43): distance in (m+1) divided by distance in (m). A sharp
+    # increase indicates a false neighbour. Non-finite ratios (zero/zero or
+    # inf from the rare zero-distance branch) are *dropped* before averaging
+    # rather than substituted by a large sentinel: substituting biases E(m)
+    # upward in proportion to the number of degenerate points, whereas
+    # Cao's method assumes well-defined ratios only.
     with np.errstate(divide='ignore', invalid='ignore'):
         a_i = distance_m_plus_1 / nn_distance
-        a_i = np.where(np.isfinite(a_i), a_i, 1e10) # Safety failsafe against division by zero
-    
-    # E(m) is the averaging of these ratios over all points.
-    E_m = np.mean(a_i)
-    # E*(m) is the average of absolute differences only in the new axis (stochastic indicator for E2)
-    E_star_m = np.mean(abs_diff_new)
-    
+    a_i_finite = a_i[np.isfinite(a_i)]
+
+    # E(m) is the averaging of these ratios over all *valid* points.
+    E_m = float(np.mean(a_i_finite)) if a_i_finite.size else np.nan
+    # E*(m) is the average of absolute differences only in the new axis
+    # (stochastic indicator for E2). Same finite-only safeguard.
+    abs_diff_finite = abs_diff_new[np.isfinite(abs_diff_new)]
+    E_star_m = float(np.mean(abs_diff_finite)) if abs_diff_finite.size else np.nan
+
     return m, E_m, E_star_m
 
 # ------------------------------------------------------------------------------
@@ -229,15 +235,7 @@ if __name__ == "__main__":
     # SETTINGS: τ from mutual-information first minimum (``mutual/_mi_summary.txt``).
     # =========================================================================
     config = load_config()
-    CAO_FILES = [
-        "BTCUSD_BITSTAMP_1h_complete_logreturns.dat",
-        "ETHUSD_BITSTAMP_1h_complete_logreturns.dat",
-        "LTCUSD_BITSTAMP_1h_complete_logreturns.dat",
-        "XRPUSD_BITSTAMP_1h_complete_logreturns.dat",
-        "LINKUSD_BITSTAMP_1h_complete_logreturns.dat",
-        "DOGEUSD_BITSTAMP_1h_complete_logreturns.dat",
-        "ADAUSD_BITSTAMP_1h_complete_logreturns.dat",
-    ]
+    CAO_FILES = pipeline_logreturn_files(ext="dat", config=config)
     file_settings = [
         {"file": fn, "tau": tau_for_symbol_from_mutual(fn.split("_")[0], config)}
         for fn in CAO_FILES

@@ -7,7 +7,7 @@ The LLE is represented by the slope of the linear scaling region of these curves
 
 Standalone usage (raw curves only):
 
-    py -3 plot_lyap_k_output.py C:\DCh\data\results\lambda_max_test_100\BTCUSD_run2_tau2\BTCUSD_lyap.txt
+    py -3 plot_lyap_k_output.py data/results/lambda_max_test_100/BTCUSD_run2_tau2/BTCUSD_lyap.txt
 
 With the Kantz / hypothesis LLE fit line (OLS slope of the highest-quality
 ε-block; same rule as ``invariants_lyapunov.extract_lle_ols``):

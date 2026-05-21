@@ -9,7 +9,15 @@ from mpl_toolkits.mplot3d import Axes3D  # noqa: F401 — registers 3d projectio
 
 # [Inference] Import configuration and utility functions from a local custom module. 
 # These handle environment paths, data preprocessing preferences, and dynamic parameter retrieval.
-from config_loader import load_config, get_data_dir, get_results_dir, ensure_dir, prefer_liquidity_cut, tau_for_symbol_from_mutual
+from config_loader import (
+    load_config,
+    get_data_dir,
+    get_results_dir,
+    ensure_dir,
+    pipeline_logreturn_files,
+    prefer_liquidity_cut,
+    tau_for_symbol_from_mutual,
+)
 
 # ==========================================================
 # 1. DELAY τ from mutual information (``mutual/_mi_summary.txt``); see config_loader.
@@ -20,16 +28,8 @@ from config_loader import load_config, get_data_dir, get_results_dir, ensure_dir
 # This means each point in the reconstructed phase space will have 3 coordinates.
 M = 3        
 
-# List of target CSV filenames containing hourly log return data for various cryptocurrency pairs.
-FILES = [
-    "BTCUSD_BITSTAMP_1h_complete_logreturns.csv",
-    "ETHUSD_BITSTAMP_1h_complete_logreturns.csv",
-    "LTCUSD_BITSTAMP_1h_complete_logreturns.csv",
-    "XRPUSD_BITSTAMP_1h_complete_logreturns.csv",
-    "LINKUSD_BITSTAMP_1h_complete_logreturns.csv",
-    "DOGEUSD_BITSTAMP_1h_complete_logreturns.csv",
-    "ADAUSD_BITSTAMP_1h_complete_logreturns.csv",
-]
+# Per-coin log-return CSVs (timestamp + value); centralized in config_loader.
+FILES = pipeline_logreturn_files(ext="csv")
 
 # ==========================================================
 # 3. PHASE SPACE RECONSTRUCTION (DELAYED COORDINATES)

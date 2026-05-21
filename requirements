@@ -10,9 +10,10 @@
 #   - TISEAN: https://www.pks.mpg.de/tisean/
 #   - gnuplot (plots): http://www.gnuplot.info/
 #
-# Typical Windows paths in this project:
-#   - TISEAN: C:\DCh\Tisean_3.0.0\bin
-#   - gnuplot: C:\Program Files\gnuplot\bin\gnuplot.exe
+# TISEAN ships in this repo at:
+#   - <repo_root>/Tisean_3.0.0/bin
+# gnuplot is auto-detected on PATH; a typical Windows fallback is
+#   - C:\Program Files\gnuplot\bin\gnuplot.exe
 
 # --- Core numerics & tables ---
 numpy>=2.0,<3

@@ -23,6 +23,7 @@ from config_loader import (
     ensure_dir,
     prefer_liquidity_cut,
     MUTUAL_SUMMARY_SERIES_COL_W,
+    pipeline_logreturn_files,
     sync_per_coin_bat_tau_from_mutual_summary,
     default_per_coin_settings_bat_path,
 )
@@ -351,15 +352,7 @@ if __name__ == "__main__":
         os.remove(os.path.join(output_dir, SUMMARY_FILE))
     except FileNotFoundError:
         pass
-    files = [
-        "BTCUSD_BITSTAMP_1h_complete_logreturns.dat",
-        "ETHUSD_BITSTAMP_1h_complete_logreturns.dat",
-        "LTCUSD_BITSTAMP_1h_complete_logreturns.dat",
-        "XRPUSD_BITSTAMP_1h_complete_logreturns.dat",
-        "LINKUSD_BITSTAMP_1h_complete_logreturns.dat",
-        "DOGEUSD_BITSTAMP_1h_complete_logreturns.dat",
-        "ADAUSD_BITSTAMP_1h_complete_logreturns.dat",
-    ]
+    files = pipeline_logreturn_files(ext="dat", config=config)
 
     for filename in files:
         file_path = prefer_liquidity_cut(os.path.join(data_dir, filename))

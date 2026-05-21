@@ -32,8 +32,12 @@ except Exception:
 # ---------------------------------------------------------------------------
 
 DEFAULT_CONFIG = {
-    # All time series and TISEAN result trees live under these roots.
-    "paths": {"data_dir": r"C:\DCh\data", "results_dir": r"C:\DCh\data\results"},
+    # All time series and TISEAN result trees live under these roots. Defaults
+    # are *relative to the repository root* so the project works after a
+    # ``git clone`` to any directory, without hand-editing ``config.yaml``.
+    # ``resolve_path()`` upgrades these to absolute paths against
+    # :func:`project_root` at runtime.
+    "paths": {"data_dir": "data", "results_dir": "data/results"},
     # Bitstamp download window; null "to" → today's UTC date in get_download_range().
     "download": {"from": None, "to": None},
     "liquidity": {
@@ -46,7 +50,7 @@ DEFAULT_CONFIG = {
         # null = use the last timestamp in each file (no artificial cutoff).
         "analysis_end": None,
         # Used only when mode is "fixed" or "fixed_date": number of trailing samples to keep.
-        "fixed_tail_points": 35040,
+        "fixed_tail_points": 8760,
         # When True, liquidity.py writes *_logreturns_cut.* siblings used by the active pipeline.
         "create_cut_files": True,
         "create_backup_before_cut": True,
@@ -386,7 +390,7 @@ def prefer_liquidity_cut(file_path):
     if cut_path != normalized:
         raise FileNotFoundError(
             f"Required liquidity-cut data file is missing: {cut_path}. "
-            "Run C:\\DCh\\liquidity.py before this pipeline."
+            "Run liquidity.py from the repository root before this pipeline."
         )
     return normalized
 
@@ -411,10 +415,52 @@ TAU_FALLBACK_BY_SYMBOL = {
     "ADAUSD": 2,
 }
 
-# Coins that participate in the active Bitstamp pipeline (must match *.bat FILE lists).
+# Coins that participate in the active Bitstamp pipeline. This is the single
+# source of truth: every Python script and every ``.bat`` file derives its
+# per-coin file list from :func:`pipeline_logreturn_files` so adding /
+# removing a coin is a one-line edit here.
 PIPELINE_SYMBOLS = (
     "BTCUSD", "ETHUSD", "LTCUSD", "XRPUSD", "LINKUSD", "DOGEUSD", "ADAUSD",
 )
+
+
+def pipeline_logreturn_files(ext: str = "dat", config=None) -> list[str]:
+    """Per-coin filenames for the active pipeline.
+
+    ``ext`` selects which canonical suffix is appended to each symbol in
+    :data:`PIPELINE_SYMBOLS`:
+
+    * ``"dat"`` — TISEAN-style 1-column log-returns (``*_logreturns.dat``),
+    * ``"csv"`` — log-returns with timestamp column (``*_logreturns.csv``),
+    * ``"raw"`` — raw OHLC CSV from ``crypto_data_all.py``
+      (``*_BITSTAMP_1h_complete.csv``).
+
+    Suffixes come from ``config.yaml`` ``files:`` (overridable per project) and
+    fall back to :data:`DEFAULT_CONFIG`. ``.bat`` files can fetch the same
+    list via ``py -3 -c "from config_loader import pipeline_logreturn_files;
+    print(' '.join(pipeline_logreturn_files()))"`` so adding a coin updates
+    every batch script automatically.
+    """
+    cfg = config if config is not None else load_config()
+    files_cfg = cfg.get("files", DEFAULT_CONFIG["files"])
+    if ext == "dat":
+        suffix = files_cfg.get(
+            "logreturns_dat_suffix", DEFAULT_CONFIG["files"]["logreturns_dat_suffix"]
+        )
+    elif ext == "csv":
+        suffix = files_cfg.get(
+            "logreturns_csv_suffix", DEFAULT_CONFIG["files"]["logreturns_csv_suffix"]
+        )
+    elif ext == "raw":
+        suffix = files_cfg.get(
+            "raw_csv_suffix", DEFAULT_CONFIG["files"]["raw_csv_suffix"]
+        )
+    else:
+        raise ValueError(
+            f"pipeline_logreturn_files: unknown ext={ext!r}; "
+            "expected one of 'dat', 'csv', 'raw'."
+        )
+    return [f"{sym}{suffix}" for sym in PIPELINE_SYMBOLS]
 
 
 def mutual_summary_path(config=None):
@@ -533,10 +579,15 @@ def audit_invariant_parameters(
         tau_rqa = sk.get(f"TAU_RQA_{sym}")
         w_d2 = sk.get(f"W_D2_{sym}")
 
+        missing_any = False
         for label, val in (("TAU_D2", tau_d2), ("TAU_LLE", tau_lle), ("TAU_RQA", tau_rqa), ("W_D2", w_d2)):
             if val is None:
                 issues.append(f"MISSING: {label}_{sym} in _per_coin_settings.bat")
-                continue
+                missing_any = True
+        if missing_any:
+            # Skip downstream conversion so we don't double-report the same coin
+            # as both MISSING and "non-numeric tau/W".
+            continue
 
         try:
             t2, tl, tr, w = (

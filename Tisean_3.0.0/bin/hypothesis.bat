@@ -20,6 +20,7 @@ echo.
 echo Distributed hypothesis workflow completed.
 
 echo [4/4] Building Word summary ^(results.docx in results folder^)...
+REM Use repo root derived from this .bat file's location (relocatable).
 pushd "%~dp0..\.." || ( echo ERROR: Cannot cd to repo root & exit /b 1 )
 py -3 documents.py
 if errorlevel 1 (

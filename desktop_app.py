@@ -64,7 +64,8 @@ from config_loader import (
 from hypothesis_config import DEFAULT_BOOTSTRAP_SAMPLES
 
 
-# Repo root (``C:\DCh``) — cwd for all ``py -3 <script>.py`` invocations.
+# Repo root — directory containing this file, used as cwd for all
+# ``py -3 <script>.py`` invocations regardless of where the repo lives.
 ROOT = Path(__file__).resolve().parent
 # Windows Python launcher; use ``py -3`` so the same interpreter as CLI docs.
 PY = "py"
@@ -876,7 +877,12 @@ class PipelineApp(QMainWindow):
                 "DCH_LYAP_MIN_NEIGHBORS", str(DEFAULT_DCH_LYAP_MIN_NEIGHBORS_TEST)
             )
         else:
-            env.insert("DCH_TEST_MODE", "false")
+            # Production: explicitly clear stale lyap_k overrides so hypothesis.py
+            # uses its production defaults (matches the Lambda_max.bat production
+            # branch). Without this, an earlier test-mode run in the same shell
+            # could leak short-series settings into a production run.
+            for var in ("DCH_LYAP_STEPS", "DCH_LYAP_ITERATIONS", "DCH_LYAP_MIN_NEIGHBORS"):
+                env.remove(var)
         env.insert(
             "DCH_RUN_HYPOTHESIS",
             "true" if self.chk_run_hypothesis.isChecked() else "false",

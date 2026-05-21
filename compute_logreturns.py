@@ -25,7 +25,7 @@ import os       # The 'os' (Operating System) library is used to interact with t
 import csv      # The 'csv' library provides specialized tools for efficient reading and writing of comma-separated values.
                 # It automatically handles issues with quotes or delimiters within text fields.
 from math import log  # From the 'math' module, we import only the 'log' function.
-from config_loader import load_config, get_data_dir
+from config_loader import load_config, get_data_dir, pipeline_logreturn_files
                       # In Python, the 'log' function without a base argument calculates the natural logarithm (base 'e'),
                       # which is exactly what is needed for calculating continuous (logarithmic) returns.
 
@@ -43,21 +43,13 @@ def main():
     INPUT_DIR = get_data_dir(config)
 
     # --- 1. Definition of the input data file list ---
-    # We create a static list of strings.
-    # Each string represents the relative path to one CSV file in the target directory.
-    # These files must exist in the specified folder; otherwise, the program will report an error and skip them.
-    files = [
-        "BTCUSD_BITSTAMP_1h_complete.csv", 
-        "ETHUSD_BITSTAMP_1h_complete.csv", 
-        "LTCUSD_BITSTAMP_1h_complete.csv", 
-        "XRPUSD_BITSTAMP_1h_complete.csv", 
-        "LINKUSD_BITSTAMP_1h_complete.csv",
-        "DOGEUSD_BITSTAMP_1h_complete.csv",
-        "ADAUSD_BITSTAMP_1h_complete.csv",
-    ]
+    # The canonical list of raw OHLC CSVs is centralized in
+    # ``config_loader.pipeline_logreturn_files`` so adding/removing a coin
+    # only touches ``PIPELINE_SYMBOLS`` there (no per-script edits).
+    files = pipeline_logreturn_files(ext="raw", config=config)
 
     for filename in files:
-        # Create the full path to the file (e.g., C:\DCh\data\BTCUSD...)
+        # Build the full path to the file under the configured data directory.
         input_file = os.path.join(INPUT_DIR, filename)
         
         print(f"\n==========================================")

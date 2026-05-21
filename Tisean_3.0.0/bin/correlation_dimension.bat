@@ -19,14 +19,31 @@ set RUN_HYPOTHESIS=true
 if defined DCH_RUN_HYPOTHESIS set RUN_HYPOTHESIS=%DCH_RUN_HYPOTHESIS%
 set "DIMENSION_METRICS=ELLNER"
 if defined DCH_DIMENSION_METRICS set "DIMENSION_METRICS=%DCH_DIMENSION_METRICS%"
-set DATA_DIR=C:\DCh\data
-set RESULTS_DIR=%DATA_DIR%\results
-set TISEAN=C:\DCh\Tisean_3.0.0\bin
-set GNUPLOT_EXE=C:\Program Files\gnuplot\bin\gnuplot.exe
-set PYTHON_EXE=py
-set PYTHON_ARGS=-3
-set PRINT_RESULTS=C:\DCh\print_results.py
-set FILES=BTCUSD_BITSTAMP_1h_complete_logreturns.dat ETHUSD_BITSTAMP_1h_complete_logreturns.dat LTCUSD_BITSTAMP_1h_complete_logreturns.dat XRPUSD_BITSTAMP_1h_complete_logreturns.dat LINKUSD_BITSTAMP_1h_complete_logreturns.dat DOGEUSD_BITSTAMP_1h_complete_logreturns.dat ADAUSD_BITSTAMP_1h_complete_logreturns.dat
+
+REM Resolve repo root from this .bat file's own location so paths work after
+REM a fresh `git clone` to any directory, without editing absolute paths.
+pushd "%~dp0..\.." && set "REPO_ROOT=%CD%" && popd
+set "DATA_DIR=%REPO_ROOT%\data"
+set "RESULTS_DIR=%DATA_DIR%\results"
+set "TISEAN=%~dp0"
+if "%TISEAN:~-1%"=="\" set "TISEAN=%TISEAN:~0,-1%"
+set "PYTHON_EXE=py"
+set "PYTHON_ARGS=-3"
+set "PRINT_RESULTS=%REPO_ROOT%\print_results.py"
+
+REM gnuplot: PATH lookup first, then well-known Windows install location.
+set "GNUPLOT_EXE="
+for %%G in (gnuplot.exe) do set "GNUPLOT_EXE=%%~$PATH:G"
+if "%GNUPLOT_EXE%"=="" if exist "C:\Program Files\gnuplot\bin\gnuplot.exe" set "GNUPLOT_EXE=C:\Program Files\gnuplot\bin\gnuplot.exe"
+
+REM Per-coin filename list from config_loader.pipeline_logreturn_files.
+pushd "%REPO_ROOT%"
+for /f "delims=" %%F in ('%PYTHON_EXE% %PYTHON_ARGS% -c "from config_loader import pipeline_logreturn_files; print(' '.join(pipeline_logreturn_files()))"') do set "FILES=%%F"
+popd
+if "%FILES%"=="" (
+    echo [ERROR] Could not derive FILES from config_loader.pipeline_logreturn_files.
+    exit /b 1
+)
 
 REM Per-coin (tau, W) overrides come from the shared settings file.
 call "%~dp0_per_coin_settings.bat"
@@ -89,7 +106,7 @@ for %%F in (%FILES%) do (
         echo   [INFO] Using liquidity-cut data: !FULL_DATA!
     ) else (
         echo   [ERROR] Required liquidity-cut data missing: !CUT_DATA!
-        echo   [ERROR] Run C:\DCh\liquidity.py before this pipeline.
+        echo   [ERROR] Run liquidity.py from the repository root before this pipeline.
         exit /b 1
     )
 
@@ -122,7 +139,7 @@ for %%F in (%FILES%) do (
         set "HYP_DIR=!RUN2_DIR!\hypothesis_d2"
         if not exist "!HYP_DIR!" mkdir "!HYP_DIR!"
         echo   [Hypothesis] dimension surrogate test ^(metrics=%DIMENSION_METRICS%, tau=!COIN_TAU!, W=!COIN_W!^)
-        "%PYTHON_EXE%" %PYTHON_ARGS% "C:\DCh\hypothesis.py" --input "!DATA_FILE!" --base "!BASE!" --delay !COIN_TAU! --theiler !COIN_W! --output_dir "!HYP_DIR!" --test_mode "%TEST_MODE%" --metrics_list "%DIMENSION_METRICS%" !DCH_HYP_EXTRA!
+        "%PYTHON_EXE%" %PYTHON_ARGS% "%REPO_ROOT%\hypothesis.py" --input "!DATA_FILE!" --base "!BASE!" --delay !COIN_TAU! --theiler !COIN_W! --output_dir "!HYP_DIR!" --test_mode "%TEST_MODE%" --metrics_list "%DIMENSION_METRICS%" !DCH_HYP_EXTRA!
         if errorlevel 1 exit /b 1
         "%PYTHON_EXE%" %PYTHON_ARGS% "%PRINT_RESULTS%" boot "!HYP_DIR!\!BASE!_surrogate_summary.txt"
     ) else (

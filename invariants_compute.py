@@ -3,6 +3,7 @@
 import glob
 import logging
 import os
+import shutil
 import subprocess
 
 import numpy as np
@@ -25,18 +26,28 @@ def compute_invariants(series_array, output_dir, label, delay, theiler,
                        metric_names, rqa_radius=None, series_std_fallback=np.nan,
                        rqa_radius_mode="percentile",
                        rqa_percentile=RQA_RADIUS_PERCENTILE_DEFAULT,
-                       rqa_radius_log=None):
+                       rqa_radius_log=None,
+                       lyap_keep_path=None):
     """Compute invariants for an in-memory series. Returns (mean_dict, sd_dict, n_dict).
 
     Value / SD / n sources:
       TAKENS — plateau mean of the c2t Takens-Theiler curve d_2^(T)(r') for
                embedding m=3. Its plateau end-points also define r_min/r_max.
+               ``out_n["TAKENS"]`` is the number of plateau points.
       ELLNER — Ellner extension (eq. 8.78) evaluated on .c2 between the same
-               r_min and r_max. The reported SD/n come from the Takens plateau
-               dispersion and serve as an orientation for the interval quality.
+               r_min and r_max. The reported SD/n are *intentionally copied
+               from the Takens plateau*: Ellner is a finite-interval scalar
+               so there is no scale-by-scale dispersion to report, but the
+               plateau dispersion is a useful orientation for interval quality.
+               This means ``out_std["ELLNER"] == out_std["TAKENS"]`` and
+               ``out_n["ELLNER"] == out_n["TAKENS"]`` by design.
       LLE   — OLS slope of the highest-quality lyap_k S(t) block at m=3
               (selected via ``invariants_lyapunov.find_best_lle_block``);
-              uncertainty is the OLS std_err of the selected slope.
+              ``out_std["LLE"]`` is the OLS standard error of the selected
+              slope. **Note on ``out_n["LLE"]``**: it is the number of usable
+              ε-blocks (not a plateau point count), kept for diagnostics. It
+              does not affect the bootstrap TS decision (``hypothesis_cli``
+              uses the bootstrap-cloud count for the ``B`` column).
       RQA   — one metric value computed on the full time series
 
     For RQA, the recurrence radius is selected dynamically when
@@ -44,6 +55,12 @@ def compute_invariants(series_array, output_dir, label, delay, theiler,
     of pairwise Euclidean distances between embedded state vectors. If the
     percentile calculation cannot be performed, the function falls back to the
     explicit `rqa_radius` value (or `DEFAULT_RQA_RADIUS` if that is also missing).
+
+    ``lyap_keep_path`` (optional): when LLE is in scope, copy the lyap_k
+    output file to this path before the tmp directory is cleaned. Used by
+    ``hypothesis_cli`` to retain the orig-series S(t) curves for the LLE
+    diagnostic plot, even when the .bat upstream did not produce a sibling
+    ``{base}_lyap.txt``.
     """
     metric_names = list(metric_names)
 
@@ -119,8 +136,23 @@ def compute_invariants(series_array, output_dir, label, delay, theiler,
             #   with its OLS uncertainty.
             lyap_file = prefix + "_lyap.txt"
             run_lyap_k(data_file, delay, theiler, lyap_file)
+            if lyap_keep_path:
+                # Preserve the S(t) curves for the LLE diagnostic plot before
+                # the tmp directory is wiped in the ``finally`` clause below.
+                try:
+                    keep_dir = os.path.dirname(os.path.abspath(lyap_keep_path))
+                    if keep_dir:
+                        os.makedirs(keep_dir, exist_ok=True)
+                    shutil.copyfile(lyap_file, lyap_keep_path)
+                except OSError:
+                    logger.exception(
+                        "Failed to copy lyap_k output to keep path %s",
+                        lyap_keep_path,
+                    )
             mu, sg, nn = extract_lle_ols(lyap_file)
             out["LLE"], out_std["LLE"] = mu, sg
+            # NB: out_n["LLE"] = number of usable epsilon blocks (diagnostic),
+            # not a plateau point count. See module docstring.
             out_n["LLE"] = nn
         if need_rqa:
             # ``percentile``: recompute r on each series (bootstrap locks orig's r).

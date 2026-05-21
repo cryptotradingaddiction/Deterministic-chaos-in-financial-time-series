@@ -187,6 +187,11 @@ def _fit_lle_block(blk):
     Tuple layout: ``(quality, slope, std_err, eps, t_lo, t_hi, intercept,
     n_neighbors)``. Ordering by descending quality picks the longest linear
     window with the smallest OLS slope error.
+
+    A perfectly linear window (``std_err == 0``) is the best possible fit:
+    it is mapped to ``quality = +inf`` so it wins the selection rather than
+    being silently dropped. Non-finite slope or non-positive window width
+    still skip the block.
     """
     data = blk["data"]
     if data.shape[0] < 3:
@@ -194,11 +199,19 @@ def _fit_lle_block(blk):
     slope, t_lo, t_hi, intercept, std_err = _best_linear_slope_window(
         data[:, 0], data[:, 1]
     )
-    if not (np.isfinite(slope) and np.isfinite(std_err) and std_err > 0.0):
+    if not np.isfinite(slope):
         return None
     if not (np.isfinite(t_lo) and np.isfinite(t_hi) and t_hi > t_lo):
         return None
-    quality = (t_hi - t_lo) / std_err
+    if not np.isfinite(std_err) or std_err < 0.0:
+        return None
+    if std_err == 0.0:
+        # Treat exact-linear windows as best-possible: their slope is the
+        # cleanest LLE estimate available for this block. Sorting by quality
+        # then puts them ahead of any noisy block.
+        quality = float("inf")
+    else:
+        quality = (t_hi - t_lo) / std_err
     return (
         float(quality),
         float(slope),

@@ -254,7 +254,15 @@ def main():
     # The reshuffled series is the actual null comparison in the TS statistic.
     # Normal and t(3.5) are kept as Step 0 descriptive benchmarks so the thesis
     # tables can compare the original against several noise shapes.
-    rng = np.random.default_rng(args.seed)
+    #
+    # Surrogates and the stationary bootstrap consume independent random
+    # streams derived from the same ``--seed``. Using a single Generator for
+    # both would mean the bootstrap consumes whatever bits the surrogate
+    # block left over (still reproducible, but the two procedures share state
+    # for no methodological reason). ``SeedSequence.spawn(2)`` gives two
+    # statistically independent child streams from one seed.
+    seed_surr, seed_boot = np.random.SeedSequence(args.seed).spawn(2)
+    rng = np.random.default_rng(seed_surr)
     surr_data = generate_single_surrogate(orig_data, rng)
     norm_data = generate_normal_series(mu_r, sigma_r, n, rng)
     t_data = generate_t_series(mu_r, sigma_r, n, rng, dof=T_DOF)
@@ -311,6 +319,14 @@ def main():
             use_mode = orig_rqa_mode if label == "orig" else locked_rqa_mode
             use_radius = orig_rqa_radius if label == "orig" else locked_rqa_radius
             label_key = f"{args.base}_{label}"
+            # For the original series, keep a copy of the lyap_k output so the
+            # diagnostic LLE plot can be drawn from a guaranteed path even when
+            # the upstream .bat (Lambda_max.bat) is not what called us.
+            lyap_keep_path = None
+            if label == "orig" and "LLE" in metrics_for_label:
+                lyap_keep_path = os.path.join(
+                    args.output_dir, f"{args.base}_orig_lyap.txt",
+                )
             inv_part, inv_std_part, inv_n_part = compute_invariants(
                 series, tmp_dir, label_key,
                 args.delay, args.theiler, metrics_for_label, use_radius,
@@ -318,6 +334,7 @@ def main():
                 rqa_radius_mode=use_mode,
                 rqa_percentile=args.rqa_percentile,
                 rqa_radius_log=rqa_radius_log,
+                lyap_keep_path=lyap_keep_path,
             )
 
             # Lock the radius using whatever value was applied to the original
@@ -358,7 +375,7 @@ def main():
             orig_data,
             args.bootstrap_samples,
             mean_block_length=mean_block_length,
-            seed=args.seed,
+            seed=seed_boot,
         )
         show_warnings = os.environ.get("DCH_HYPOTHESIS_WARNINGS", "").strip().lower() in (
             "1", "true", "yes", "on"
@@ -590,14 +607,25 @@ def main():
         try:
             from plot_lyap_k_output import plot_orig_lle_fit
 
+            # Resolution order for the orig S(t) curves:
+            # 1. ``lyap_keep_path`` written by compute_invariants for this run,
+            # 2. ``{run_dir}/{base}_lyap.txt`` produced by Lambda_max.bat
+            #    when this CLI was invoked from the .bat pipeline.
             run_dir = os.path.dirname(os.path.abspath(args.output_dir))
-            cand_lyap = os.path.join(run_dir, f"{args.base}_lyap.txt")
-            if os.path.isfile(cand_lyap):
+            cand_paths = [
+                os.path.join(args.output_dir, f"{args.base}_orig_lyap.txt"),
+                os.path.join(run_dir, f"{args.base}_lyap.txt"),
+            ]
+            cand_lyap = next((p for p in cand_paths if os.path.isfile(p)), None)
+            if cand_lyap:
                 out_png = os.path.join(args.output_dir, f"{args.base}_lyap_lle_fit.png")
                 plot_orig_lle_fit(cand_lyap, out_png)
                 print(f"  -> LLE diagnostic plot written to {out_png}")
             else:
-                logger.warning("LLE plot skipped: missing %s", cand_lyap)
+                logger.warning(
+                    "LLE plot skipped: no lyap_k output found in %s",
+                    cand_paths,
+                )
         except BaseException:
             logger.exception("Failed to write LLE diagnostic plot")
 

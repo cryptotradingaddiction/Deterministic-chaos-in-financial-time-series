@@ -46,6 +46,7 @@ from config_loader import (
     get_results_dir,
     load_config,
     parse_per_coin_settings_bat,
+    pipeline_logreturn_files,
     prefer_liquidity_cut,
     rqa_params_for_symbol,
 )
@@ -68,16 +69,8 @@ from pyrqa.time_series import TimeSeries
 # RAD_RQA_<sym> in _per_coin_settings.bat is fallback when percentile fails.
 RADIUS_PERCENTILE = RQA_RADIUS_PERCENTILE_DEFAULT
 
-# Default coin list (must match FILES= in RQA.bat and other pipeline scripts).
-_DEFAULT_LOGRETURN_FILES = [
-    "BTCUSD_BITSTAMP_1h_complete_logreturns.dat",
-    "ETHUSD_BITSTAMP_1h_complete_logreturns.dat",
-    "LTCUSD_BITSTAMP_1h_complete_logreturns.dat",
-    "XRPUSD_BITSTAMP_1h_complete_logreturns.dat",
-    "LINKUSD_BITSTAMP_1h_complete_logreturns.dat",
-    "DOGEUSD_BITSTAMP_1h_complete_logreturns.dat",
-    "ADAUSD_BITSTAMP_1h_complete_logreturns.dat",
-]
+# Coin list is centralized in ``config_loader.pipeline_logreturn_files``; that
+# helper feeds RQA.bat and every Python script in the pipeline.
 
 
 def _load_dat_series(path: str) -> list[float]:
@@ -120,7 +113,7 @@ def main() -> None:
     elif not per_coin:
         print(f"[WARN] No assignments parsed from {bat_path}")
 
-    for filename in _DEFAULT_LOGRETURN_FILES:
+    for filename in pipeline_logreturn_files(ext="dat", config=config):
         input_path = prefer_liquidity_cut(os.path.join(data_dir, filename))
         symbol = filename.split("_")[0]
         tau, config_radius, theiler_w = rqa_params_for_symbol(symbol, per_coin)

@@ -16,16 +16,32 @@ set TEST_MODE=false
 if defined DCH_TEST_MODE set TEST_MODE=%DCH_TEST_MODE%
 set RUN_HYPOTHESIS=true
 if defined DCH_RUN_HYPOTHESIS set RUN_HYPOTHESIS=%DCH_RUN_HYPOTHESIS%
-set DATA_DIR=C:\DCh\data
-set RESULTS_DIR=%DATA_DIR%\results
-set TISEAN=C:\DCh\Tisean_3.0.0\bin
-set GNUPLOT_EXE=C:\Program Files\gnuplot\bin\gnuplot.exe
-set PYTHON_EXE=py
-set PYTHON_ARGS=-3
-set PY_RQA_SCRIPT=C:\DCh\rqa_values.py
-set RQA_RADIUS_SCRIPT=C:\DCh\rqa_radius.py
-set PRINT_RESULTS=C:\DCh\print_results.py
-set FILES=BTCUSD_BITSTAMP_1h_complete_logreturns.dat ETHUSD_BITSTAMP_1h_complete_logreturns.dat LTCUSD_BITSTAMP_1h_complete_logreturns.dat XRPUSD_BITSTAMP_1h_complete_logreturns.dat LINKUSD_BITSTAMP_1h_complete_logreturns.dat DOGEUSD_BITSTAMP_1h_complete_logreturns.dat ADAUSD_BITSTAMP_1h_complete_logreturns.dat
+
+REM Relocatable paths derived from this .bat file's own location.
+pushd "%~dp0..\.." && set "REPO_ROOT=%CD%" && popd
+set "DATA_DIR=%REPO_ROOT%\data"
+set "RESULTS_DIR=%DATA_DIR%\results"
+set "TISEAN=%~dp0"
+if "%TISEAN:~-1%"=="\" set "TISEAN=%TISEAN:~0,-1%"
+set "PYTHON_EXE=py"
+set "PYTHON_ARGS=-3"
+set "PY_RQA_SCRIPT=%REPO_ROOT%\rqa_values.py"
+set "RQA_RADIUS_SCRIPT=%REPO_ROOT%\rqa_radius.py"
+set "PRINT_RESULTS=%REPO_ROOT%\print_results.py"
+
+REM gnuplot: PATH lookup first, then Windows install fallback.
+set "GNUPLOT_EXE="
+for %%G in (gnuplot.exe) do set "GNUPLOT_EXE=%%~$PATH:G"
+if "%GNUPLOT_EXE%"=="" if exist "C:\Program Files\gnuplot\bin\gnuplot.exe" set "GNUPLOT_EXE=C:\Program Files\gnuplot\bin\gnuplot.exe"
+
+REM Per-coin filename list from config_loader.pipeline_logreturn_files.
+pushd "%REPO_ROOT%"
+for /f "delims=" %%F in ('%PYTHON_EXE% %PYTHON_ARGS% -c "from config_loader import pipeline_logreturn_files; print(' '.join(pipeline_logreturn_files()))"') do set "FILES=%%F"
+popd
+if "%FILES%"=="" (
+    echo [ERROR] Could not derive FILES from config_loader.pipeline_logreturn_files.
+    exit /b 1
+)
 
 REM Per-coin (tau, radius) overrides come from the shared settings file.
 call "%~dp0_per_coin_settings.bat"
@@ -82,7 +98,7 @@ for %%F in (%FILES%) do (
         echo   [INFO] Using liquidity-cut data: !FULL_DATA!
     ) else (
         echo   [ERROR] Required liquidity-cut data missing: !CUT_DATA!
-        echo   [ERROR] Run C:\DCh\liquidity.py before this pipeline.
+        echo   [ERROR] Run liquidity.py from the repository root before this pipeline.
         exit /b 1
     )
 
@@ -128,7 +144,7 @@ for %%F in (%FILES%) do (
         set "HYP_DIR=!RUN2_DIR!\hypothesis_rqa"
         if not exist "!HYP_DIR!" mkdir "!HYP_DIR!"
         echo   [Hypothesis] RQA bootstrap TS test ^(tau=!COIN_TAU!, r=!COIN_RAD_EFF! fixed from rqa_radius.py, W=!COIN_W!^)
-        "%PYTHON_EXE%" %PYTHON_ARGS% "C:\DCh\hypothesis.py" --input "!DATA_FILE!" --base "!BASE!" --delay !COIN_TAU! --theiler !COIN_W! --rqa_radius !COIN_RAD_EFF! --rqa_radius_mode fixed --output_dir "!HYP_DIR!" --test_mode "%TEST_MODE%" --metrics_list "RR,DET,LAM,MAXLINE,ENTR,TT,TREND" !DCH_HYP_EXTRA!
+        "%PYTHON_EXE%" %PYTHON_ARGS% "%REPO_ROOT%\hypothesis.py" --input "!DATA_FILE!" --base "!BASE!" --delay !COIN_TAU! --theiler !COIN_W! --rqa_radius !COIN_RAD_EFF! --rqa_radius_mode fixed --output_dir "!HYP_DIR!" --test_mode "%TEST_MODE%" --metrics_list "RR,DET,LAM,MAXLINE,ENTR,TT,TREND" !DCH_HYP_EXTRA!
         if errorlevel 1 exit /b 1
         "%PYTHON_EXE%" %PYTHON_ARGS% "%PRINT_RESULTS%" boot "!HYP_DIR!\!BASE!_surrogate_summary.txt"
     ) else (
@@ -164,7 +180,7 @@ for %%F in (%FILES%) do (
         set "FULL_DATA=!CUT_DATA!"
     ) else (
         echo [ERROR] Required liquidity-cut data missing: !CUT_DATA!
-        echo [ERROR] Run C:\DCh\liquidity.py before this pipeline.
+        echo [ERROR] Run liquidity.py from the repository root before this pipeline.
         exit /b 1
     )
     if /i "%TEST_MODE%"=="true" (

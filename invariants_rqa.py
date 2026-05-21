@@ -1,5 +1,7 @@
 """RQA embedding, percentile radius, PyRQA metrics, and custom TREND."""
 
+import logging
+
 import numpy as np
 from scipy.spatial.distance import pdist
 from pyrqa.analysis_type import Classic
@@ -18,6 +20,8 @@ from hypothesis_config import (
     RQA_RADIUS_SAMPLE_SEED,
 )
 
+logger = logging.getLogger(__name__)
+
 
 def compute_percentile_radius(
     series,
@@ -32,9 +36,17 @@ def compute_percentile_radius(
     Reconstructs the (m, delay) embedded state space and returns the requested
     percentile of pairwise Euclidean distances between embedded vectors. For
     long series the embedded matrix is randomly subsampled (without replacement,
-    fixed RNG seed for reproducibility) down to `max_vectors` rows to keep pdist
-    memory bounded. Returns NaN when the embedding cannot be built or when
-    fewer than two embedded vectors are available.
+    fixed RNG seed for reproducibility) down to ``max_vectors`` rows to keep
+    pdist memory bounded.
+
+    Returns NaN when the embedding cannot be built or when fewer than two
+    embedded vectors are available.
+
+    ``seed`` is intentionally a fixed default (``RQA_RADIUS_SAMPLE_SEED``) so
+    repeat runs on the same series produce the same radius, and so the
+    subsample comparison across coins / surrogates uses the same generator
+    state. Callers that want a different RNG (e.g. sensitivity studies) can
+    override it explicitly.
     """
     delay = int(delay) if delay and int(delay) > 0 else 1
     m = int(m) if m and int(m) > 0 else 1
@@ -210,4 +222,14 @@ def compute_pyrqa_metrics(series, delay, theiler, radius=None):
             "TREND": float(trend),
         }
     except Exception:
+        # PyRQA can fail silently for too-short series, OpenCL/GPU issues, or
+        # extreme radii. Log at exception level so bootstrap "no sd" outcomes
+        # are diagnosable rather than mysteriously NaN. Cost is one stack
+        # trace per failed series; turn down with logging.getLogger to WARNING.
+        logger.exception(
+            "PyRQA computation failed (N=%d, delay=%s, theiler=%s, radius=%s); "
+            "returning NaN metrics.",
+            len(series) if hasattr(series, "__len__") else -1,
+            delay, theiler, radius,
+        )
         return {k: np.nan for k in RQA_KEYS}

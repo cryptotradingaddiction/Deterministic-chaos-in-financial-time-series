@@ -38,10 +38,9 @@ from hypothesis_ts import invariant_bootstrap_ts_test  # noqa: F401
 from invariants_compute import compute_invariants  # noqa: F401
 from invariants_correlation import compute_ellner_from_c2, extract_takens_plateau  # noqa: F401
 from invariants_lyapunov import (  # noqa: F401
-    _best_linear_slope,
-    _best_linear_slope_window,
-    _parse_lyap_blocks,
     extract_lle_mean_std,
+    extract_lle_ols,
+    find_best_lle_block,
 )
 from invariants_rqa import (  # noqa: F401
     compute_percentile_radius,
@@ -61,9 +60,8 @@ __all__ = [
     "compute_percentile_radius",
     "format_rqa_radius",
     "extract_lle_mean_std",
-    "_parse_lyap_blocks",
-    "_best_linear_slope",
-    "_best_linear_slope_window",
+    "extract_lle_ols",
+    "find_best_lle_block",
 ]
 
 if __name__ == "__main__":

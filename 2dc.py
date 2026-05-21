@@ -8,6 +8,7 @@ from config_loader import (
     get_data_dir,
     get_results_dir,
     ensure_dir,
+    pipeline_logreturn_files,
     prefer_liquidity_cut,
     tau_for_symbol_from_mutual,      # tau from mutual information first-minimum criterion
 )
@@ -24,16 +25,8 @@ SUMMARY_HEADER = (
 )
 
 # ── Input file list ────────────────────────────────────────────────────────────
- 
-files = [
-    "BTCUSD_BITSTAMP_1h_complete_logreturns.csv",
-    "ETHUSD_BITSTAMP_1h_complete_logreturns.csv",
-    "LTCUSD_BITSTAMP_1h_complete_logreturns.csv",
-    "XRPUSD_BITSTAMP_1h_complete_logreturns.csv",
-    "LINKUSD_BITSTAMP_1h_complete_logreturns.csv",
-    "DOGEUSD_BITSTAMP_1h_complete_logreturns.csv",
-    "ADAUSD_BITSTAMP_1h_complete_logreturns.csv",
-]
+# Per-coin log-return CSVs (timestamp + value); centralized in config_loader.
+files = pipeline_logreturn_files(ext="csv")
 
 # ── Computation parameters ─────────────────────────────────────────────────────
  

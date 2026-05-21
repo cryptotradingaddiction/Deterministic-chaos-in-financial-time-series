@@ -18,6 +18,7 @@ from config_loader import (
     get_liquidity_settings,
     get_results_dir,
     load_config,
+    pipeline_logreturn_files,
 )
 
 # Merged into settings from config.yaml (same keys as under `liquidity:`).
@@ -28,20 +29,11 @@ from config_loader import (
 #   }
 LOCAL_LIQUIDITY_PATCH = {}
 
-# Example files in centralized data folder:
-# C:\DCh\data\BTCUSD_BITSTAMP_1h_complete_logreturns.csv
-# C:\DCh\data\ETHUSD_BITSTAMP_1h_complete_logreturns.csv
-# ...
-
-FILES = [
-    "BTCUSD_BITSTAMP_1h_complete_logreturns.csv",
-    "ETHUSD_BITSTAMP_1h_complete_logreturns.csv",
-    "LTCUSD_BITSTAMP_1h_complete_logreturns.csv",
-    "XRPUSD_BITSTAMP_1h_complete_logreturns.csv",
-    "LINKUSD_BITSTAMP_1h_complete_logreturns.csv",
-    "DOGEUSD_BITSTAMP_1h_complete_logreturns.csv",
-    "ADAUSD_BITSTAMP_1h_complete_logreturns.csv",
-]
+# Per-coin log-return CSVs (timestamp + value column). Suffix and symbol list
+# come from ``pipeline_logreturn_files`` so adding a coin is a one-line edit
+# in ``config_loader.PIPELINE_SYMBOLS``. Resolved paths live under
+# ``get_data_dir(config)`` regardless of project location.
+FILES = pipeline_logreturn_files(ext="csv")
 
 
 def cut_dataset_from_liquidity_start(df, optimal_start, analysis_end):

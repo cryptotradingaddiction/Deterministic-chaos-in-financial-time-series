@@ -9,7 +9,14 @@ where:
 import numpy as np
 from scipy.signal import find_peaks
 import os
-from config_loader import load_config, get_data_dir, get_results_dir, ensure_dir, prefer_liquidity_cut
+from config_loader import (
+    load_config,
+    get_data_dir,
+    get_results_dir,
+    ensure_dir,
+    pipeline_logreturn_files,
+    prefer_liquidity_cut,
+)
 from report_helper import Reporter, append_summary_row
 
 SUMMARY_FILE = "_tau_w_summary.txt"
@@ -22,15 +29,7 @@ SUMMARY_HEADER = (
 config = load_config()
 data_dir = get_data_dir(config)
 output_dir = ensure_dir(os.path.join(get_results_dir(config), "tau_w"))
-files = [
-    "BTCUSD_BITSTAMP_1h_complete_logreturns.dat",
-    "ETHUSD_BITSTAMP_1h_complete_logreturns.dat",
-    "LTCUSD_BITSTAMP_1h_complete_logreturns.dat",
-    "XRPUSD_BITSTAMP_1h_complete_logreturns.dat",
-    "LINKUSD_BITSTAMP_1h_complete_logreturns.dat",
-    "DOGEUSD_BITSTAMP_1h_complete_logreturns.dat",
-    "ADAUSD_BITSTAMP_1h_complete_logreturns.dat",
-]
+files = pipeline_logreturn_files(ext="dat", config=config)
 
 # Reset the aggregated summary so each script run gets a clean table.
 try:

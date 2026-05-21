@@ -20,9 +20,14 @@ data/
 github/
 Sablona-zaverecne-prace-FFU.docx
 
-# Local MPI TISEAN tree (sources, docs, *.exe). Repo tracks only `bin/*.bat`; install
+# Local MPI TISEAN tree (sources, docs, *.exe). Repo tracks only the project's
+# own orchestration scripts under `Tisean_3.0.0/bin/`; install upstream
 # binaries from https://www.pks.mpg.de/tisean/ after clone (see README).
-/Tisean_3.0.0/
+/Tisean_3.0.0/*
+!/Tisean_3.0.0/bin/
+/Tisean_3.0.0/bin/*
+!/Tisean_3.0.0/bin/*.bat
+!/Tisean_3.0.0/bin/detect_theiler.py
 
 # PyInstaller / packaging artifacts
 *.manifest

@@ -22,7 +22,11 @@ if defined DCH_DIMENSION_METRICS set "DIMENSION_METRICS=%DCH_DIMENSION_METRICS%"
 
 REM Resolve repo root from this .bat file's own location so paths work after
 REM a fresh `git clone` to any directory, without editing absolute paths.
-pushd "%~dp0..\.." && set "REPO_ROOT=%CD%" && popd
+REM NB: keep these on separate lines — `pushd ... && set "REPO_ROOT=%CD%" && popd`
+REM expands %CD% at parse time (before pushd runs) and yields the *caller's* cwd.
+pushd "%~dp0..\.."
+set "REPO_ROOT=%CD%"
+popd
 set "DATA_DIR=%REPO_ROOT%\data"
 set "RESULTS_DIR=%DATA_DIR%\results"
 set "TISEAN=%~dp0"

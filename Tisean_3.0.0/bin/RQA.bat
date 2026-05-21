@@ -18,7 +18,11 @@ set RUN_HYPOTHESIS=true
 if defined DCH_RUN_HYPOTHESIS set RUN_HYPOTHESIS=%DCH_RUN_HYPOTHESIS%
 
 REM Relocatable paths derived from this .bat file's own location.
-pushd "%~dp0..\.." && set "REPO_ROOT=%CD%" && popd
+REM NB: keep these on separate lines — `pushd ... && set "REPO_ROOT=%CD%" && popd`
+REM expands %CD% at parse time (before pushd runs) and yields the *caller's* cwd.
+pushd "%~dp0..\.."
+set "REPO_ROOT=%CD%"
+popd
 set "DATA_DIR=%REPO_ROOT%\data"
 set "RESULTS_DIR=%DATA_DIR%\results"
 set "TISEAN=%~dp0"

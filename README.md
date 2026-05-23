@@ -5,10 +5,10 @@
 ![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)
 ![TISEAN](https://img.shields.io/badge/TISEAN-orchestration-orange)
 &nbsp;
-This repository serves as a storage for codebase used in my bachelor's thesis focused on "Determining the presence of deterministic chaos in financial time series", released in June 2026 in Czech, at Prague University of Economics and Business (VŠE v Praze).
-Link:
 &nbsp; 
-End-to-end research pipeline for nonlinear analysis of cryptocurrency log-return time series, with distributed surrogate-based hypothesis testing.
+This repository serves as a storage for codebase used in my bachelor's thesis focused on "Determining the presence of deterministic chaos in financial time series", released in June 2026 in Czech, at Prague University of Economics and Business (VŠE v Praze).
+&nbsp; 
+Link:
 This project combines:
 &nbsp;
 - data download from exchange APIs (`ccxt`),

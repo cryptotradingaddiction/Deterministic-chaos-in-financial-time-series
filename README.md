@@ -12,7 +12,7 @@ This project combines:
 - log-return preprocessing,
 - invariant estimation via TISEAN,
 - recurrence quantification via `PyRQA`,
-- stationary-bootstrap/reference testing with point-wise reshuffle, Gaussian and Student-t reference series, and a `TS` decision rule for dimension metrics (`ELLNER` by default, optionally `TAKENS` or `TAKENS,ELLNER`), **LLE**, and (by default) **RQA** scalars.
+- stationary-bootstrap testing of the original-series invariant against **three independent null reference series** (random permutation, Gaussian, Student-$t$ with $\nu=3.5$), with a `TS` decision rule **plus a two-sided Student-$t$ p-value** (df $= B-1$) for dimension metrics (`ELLNER` by default, optionally `TAKENS` or `TAKENS,ELLNER`), **LLE**, and (by default) **RQA** scalars.
 &nbsp;
 This repository serves as a storage for codebase used in my bachelor's thesis focused on "Determining the presence of deterministic chaos in financial time series", released in June 2026 in Czech, at Prague University of Economics and Business (VŠE v Praze).
 Link: 
@@ -332,17 +332,20 @@ Adding or removing a coin is a **single-line** edit; the rest of the project is 
 
 | Object | Definition | Code path |
 |--------|------------|-----------|
-| Reshuffle surrogate | i.i.d. permutation of observations | `hypothesis_surrogates.generate_single_surrogate` |
-| Gaussian reference | $\mathcal{N}(\mu_r,\sigma_r)$, length $n$ | `hypothesis_surrogates.generate_normal_series` |
-| Student-$t$ reference | $t_{\nu=3.5}$ scaled to $(\mu_r,\sigma_r)$ | `hypothesis_surrogates.generate_t_series` (`hypothesis_config.T_DOF`) |
+| Reshuffle reference (null #1) | i.i.d. permutation of observations — "ordering is irrelevant" | `hypothesis_surrogates.generate_single_surrogate` |
+| Gaussian reference (null #2) | $\mathcal{N}(\mu_r,\sigma_r)$, length $n$ — "i.i.d. Gaussian noise with matched moments" | `hypothesis_surrogates.generate_normal_series` |
+| Student-$t$ reference (null #3) | $t_{\nu=3.5}$ scaled to $(\mu_r,\sigma_r)$ — heavy-tailed match for financial returns | `hypothesis_surrogates.generate_t_series` (`hypothesis_config.T_DOF`) |
 | Stationary bootstrap replicates | Politis–Romano block resampling; block length $\sqrt{n}$ if unset | `surrogate_sampling.stationary_bootstrap_samples` ← `hypothesis_cli.main` (env `DCH_STATIONARY_BLOCK_MEAN`, default via `hypothesis_config.DEFAULT_STATIONARY_BLOCK_MEAN`) |
-| $\overline{T}_{\mathrm{boot}}$, $s_{\mathrm{boot}}$ | Mean and sample SD over $B$ bootstrap invariant values | `hypothesis_cli.main` (loop over `compute_invariants` on each bootstrap series) |
-| $T_{\mathrm{resh}}$ | Invariant on reshuffled series | Same `compute_invariants` on `surr` label |
-| **TS** | $(\overline{T}_{\mathrm{boot}} - T_{\mathrm{resh}}) / s_{\mathrm{boot}}$ | `hypothesis_ts.invariant_bootstrap_ts_test` |
-| Decision | Reject $H_0$ if $\|\mathrm{TS}\| > 3$ | Same function; threshold `hypothesis_config.DEFAULT_TS_THRESHOLD` / `--ts_threshold` |
-| Summary table | Machine-readable per-coin output | `hypothesis_cli.main` writes `*_surrogate_summary.txt`; aggregate: `print_results.py boot_aggregate` |
+| $\overline{T}_{\mathrm{boot}}$, $s_{\mathrm{boot}}$, $B_{\mathrm{eff}}$ | Mean / sample SD / count of finite bootstrap invariant values | `hypothesis_cli.main` (loop over `compute_invariants` on each bootstrap series) |
+| $T_{\mathrm{ref}}$ | Invariant on one of the three reference series ($\mathrm{ref} \in \{\mathrm{surr},\,\mathrm{normal},\,t_{3.5}\}$) | Same `compute_invariants` on the matching label |
+| **TS** (per metric × reference) | $\mathrm{TS}_{\mathrm{ref}} = (\overline{T}_{\mathrm{boot}} - T_{\mathrm{ref}}) / s_{\mathrm{boot}}$ | `hypothesis_ts.invariant_bootstrap_ts_test` |
+| **p-value** (per metric × reference) | $p = 2 \cdot \mathrm{SF}_t(\lvert\mathrm{TS}\rvert,\; df = B_{\mathrm{eff}} - 1)$ — two-sided Student-$t$ tail, MATLAB-equivalent `2*(1 - tcdf(|TS|, B-1))` | `hypothesis_ts.invariant_bootstrap_ts_test` via `scipy.stats.t.sf` (numerically stable in the 3-sigma upper tail) |
+| Decision | Reject $H_0$ if $\lvert\mathrm{TS}_{\mathrm{ref}}\rvert > 3$ — reported **per reference** | Same function; threshold `hypothesis_config.DEFAULT_TS_THRESHOLD` / `--ts_threshold` |
+| Summary table | Machine-readable per-coin output: one row per (metric, reference) | `hypothesis_cli.main` writes `*_surrogate_summary.txt`; aggregate: `print_results.py boot_aggregate` |
 
-**Bootstrap count $B$:** default `hypothesis_config.DEFAULT_BOOTSTRAP_SAMPLES` (100); override `DCH_BOOTSTRAP_SAMPLES` or `--bootstrap_samples` (bat passes via `_dch_hypothesis_cli_extra.bat`).
+**Why three references.** The bootstrap centre and SD describe the *original* series's invariant distribution and are shared across the three tests; only $T_{\mathrm{ref}}$ in the numerator changes. Each comparison answers a different question: *surr* rules out "any ordering would give the same number", *normal* rules out i.i.d. Gaussian noise, and *t3.5* rules out a heavy-tailed i.i.d. null that is the realistic random benchmark for financial log-returns. A metric that rejects $H_0$ against all three references is the strongest evidence of nonlinear structure; rejection against `surr` alone usually only reflects departure from the multiset null.
+
+**Bootstrap count $B$:** default `hypothesis_config.DEFAULT_BOOTSTRAP_SAMPLES` (100); override `DCH_BOOTSTRAP_SAMPLES` or `--bootstrap_samples` (bat passes via `_dch_hypothesis_cli_extra.bat`). $B_{\mathrm{eff}}$ in the p-value uses only finite bootstrap invariant values (non-finite replicates are dropped), so $B_{\mathrm{eff}} \le B$ in practice.
 
 ---
 
@@ -483,9 +486,19 @@ hypothesis_cli.main
 │       bootstrap_mean[metric]  := mean of finite bootstrap values
 │       bootstrap_sd[metric]    := SD (ddof=1) of finite bootstrap values
 │       bootstrap_n[metric]     := count of finite bootstrap values
-├── hypothesis_ts.invariant_bootstrap_ts_test(boot_mean, boot_sd, T_resh, threshold)
-│        → (TS, |TS|, "reject H0" / "fail to reject H0" / "insufficient data" / "no sd")
-├── write {base}_surrogate_summary.txt (series stats, Step-0 references, bootstrap TS table)
+├── for metric in bootstrap_metrics:
+│       for ref in ("surr", "normal", "t3.5"):                       # three independent nulls
+│           hypothesis_ts.invariant_bootstrap_ts_test(
+│               boot_mean[metric], boot_sd[metric],
+│               results[ref][metric],
+│               n_bootstrap=boot_n[metric],                          # df = B_eff − 1 for the Student-t p-value
+│               threshold=args.ts_threshold,
+│           )
+│               → (TS_ref, |TS_ref|, p_ref, "reject H0" / "fail to reject H0" / "insufficient data" / "no sd")
+├── write {base}_surrogate_summary.txt
+│     - parameters, series statistics, Step-0 reference comparison
+│     - one row per (metric, reference): boot_mean, boot_sd, B, orig, ref_val, TS, |TS|, p_value, decision
+│     - per-metric conclusion line summarising decisions across the three references
 └── if LLE in metric_names: plot_lyap_k_output.plot_orig_lle_fit(cand_lyap, out_png)
 ```
 
@@ -580,13 +593,13 @@ flowchart LR
 
 ### Statistical model currently used
 
-- **Null/reference series:** one point-wise reshuffle (`randperm`), one Gaussian $\mathcal{N}(\mu_r, \sigma_r)$ series, and one Student-$t$ reference with $\nu = 3.5$ scaled to $(\mu_r, \sigma_r)$.
+- **Three null/reference series:** one point-wise reshuffle (`randperm`), one Gaussian $\mathcal{N}(\mu_r, \sigma_r)$ series, and one Student-$t$ reference with $\nu = 3.5$ scaled to $(\mu_r, \sigma_r)$. **All three are full nulls**, not just descriptive benchmarks — each gets its own TS / p-value / decision in the summary.
 - **Inference:** for metrics in `DCH_DIMENSION_METRICS` (default **ELLNER**), **LLE**, and (by default) **RQA**, `hypothesis_cli.py` draws **B** stationary-bootstrap replicates (default $B=100$), computes the invariant on each, and uses the bootstrap mean and sample SD as centre and spread.
-- **Decision rule** (per metric $T$):
+- **Decision rule** (per metric $T$, per reference $\mathrm{ref}$):
 
-  $$\mathrm{TS} = \frac{\overline{T}_{\mathrm{boot}} - T_{\mathrm{resh}}}{s_{\mathrm{boot}}}, \qquad \text{reject } H_0 \text{ if } |\mathrm{TS}| > 3$$
+  $$\mathrm{TS}_{\mathrm{ref}} = \frac{\overline{T}_{\mathrm{boot}} - T_{\mathrm{ref}}}{s_{\mathrm{boot}}}, \qquad p_{\mathrm{ref}} = 2 \cdot \mathrm{SF}_t\!\bigl(\lvert\mathrm{TS}_{\mathrm{ref}}\rvert,\; df = B_{\mathrm{eff}} - 1\bigr), \qquad \text{reject } H_0 \text{ if } \lvert\mathrm{TS}_{\mathrm{ref}}\rvert > 3$$
 
-  RQA uses the same rule when `--rqa_bootstrap on` (default); recurrence radius $r$ is **locked from the original** series for all bootstrap and reference runs.
+  $\mathrm{SF}_t$ is the upper-tail survival function of the Student-$t$ distribution (equivalent to MATLAB's `1 - tcdf` but numerically stable in the rejection region). The bootstrap centre and SD are shared across the three tests; only $T_{\mathrm{ref}}$ in the numerator changes. RQA uses the same rule when `--rqa_bootstrap on` (default); recurrence radius $r$ is **locked from the original** series for all bootstrap and reference runs.
 
 ---
 &nbsp;
@@ -938,34 +951,39 @@ All three active invariant scripts respect `DCH_RUN_HYPOTHESIS`. With `DCH_RUN_H
 
 ## Statistical Model (Current, Supervisor-Aligned)
 
-### Null/reference series
+### Three null reference series
 
-For each original log-return series, `hypothesis.py` constructs:
+For each original log-return series, `hypothesis.py` constructs three independent null draws of the same length $n$:
 
-1. `surr` — point-wise random permutation of the original observations,
-2. `normal` — $\mathcal{N}(\mu_r, \sigma_r)$ series of the same length,
-3. `t3.5` — Student-$t$ reference with $\nu=3.5$, scaled to $(\mu_r, \sigma_r)$.
+1. `surr` — point-wise random permutation of the original observations (multi-set null: "ordering is irrelevant"),
+2. `normal` — $\mathcal{N}(\mu_r, \sigma_r)$ series (i.i.d. Gaussian null with matched first two moments),
+3. `t3.5` — Student-$t$ reference with $\nu = 3.5$, scaled to $(\mu_r, \sigma_r)$ (heavy-tailed i.i.d. null that is the realistic random benchmark for financial log-returns; corresponds to the MATLAB construction `surr_t = mean(surr) + std(surr)*trnd(3.5, n, 1)`).
 
-The permutation keeps the marginal mean/SD identical to the original series but destroys temporal order. The Gaussian and Student-t references are reported as **Step-0 descriptive benchmarks**, not as the main test pair — the formal TS rejection rule below uses only the bootstrap centre/SD vs. the reshuffle value.
+**Each of the three references is a full null**, not just a descriptive benchmark — the supervisor explicitly asked for all three to be tested. Every metric in the active scope (TAKENS / ELLNER / LLE / RQA-when-bootstrap-on) receives **one TS / p-value / decision triple per reference**. The bootstrap centre and SD describe the *original* series and are shared across the three tests; only $T_{\mathrm{ref}}$ in the numerator changes.
 
-**Invariants are computed on every reference series**, not just `surr`. For each metric in the active scope (TAKENS / ELLNER / LLE / RQA-when-bootstrap-on), `compute_invariants` runs once per label `(orig, surr, normal, t3.5)` plus $B$ times for the stationary bootstrap. Every per-coin `<BASE>_surrogate_summary.txt` therefore lists the invariant value on the original series and on all three reference series side-by-side. After all per-coin runs, `print_results.py boot_aggregate` emits the same columns into `_hypothesis_aggregate_summary.txt` (`<metric>_orig`, `<metric>_boot`, `<metric>_boot_sd`, `<metric>_resh`, **`<metric>_normal`**, **`<metric>_t3.5`**, `TS_<metric>`, `absTS_<metric>`), and `documents.py` carries them into the Word table "Výsledky surrogate testů" with explicit **normal** and **t3.5** columns alongside `reshuffle`.
+`compute_invariants` therefore runs once per label `(orig, surr, normal, t3.5)` plus $B$ times for the stationary bootstrap. Every per-coin `<BASE>_surrogate_summary.txt` lists the invariant value on the original series and on all three reference series side-by-side in the Step-0 block, followed by the per-reference TS table (one row per metric × reference). After all per-coin runs, `print_results.py boot_aggregate` emits the per-reference TS / p-value columns (`TS_<metric>_<ref>`, `p_<metric>_<ref>` for `<ref> ∈ {surr, normal, t3.5}`) into `_hypothesis_aggregate_summary.txt` (plus back-compat top-level `TS_<metric>` and `absTS_<metric>` that mirror the surr-reference view); `documents.py` carries the per-reference rows into the Word table "Výsledky surrogate testů" with columns **Reference**, **TS**, **|TS|**, **p-hodnota**, **Rozhodnutí**.
 
 &nbsp;
 
-### Invariant sources and test
+### Invariant sources, test statistic, and p-value
 
-The current statistical test is:
+The current statistical test is repeated **per metric × per reference**:
 
-$$\mathrm{TS} = \frac{\overline{T}_{\mathrm{boot}} - T_{\mathrm{resh}}}{s_{\mathrm{boot}}}, \qquad \text{reject } H_0 \Leftrightarrow |\mathrm{TS}| > 3$$
+$$\mathrm{TS}_{\mathrm{ref}} = \frac{\overline{T}_{\mathrm{boot}} - T_{\mathrm{ref}}}{s_{\mathrm{boot}}}, \qquad p_{\mathrm{ref}} = 2 \cdot \mathrm{SF}_t\!\bigl(\lvert\mathrm{TS}_{\mathrm{ref}}\rvert,\; df = B_{\mathrm{eff}} - 1\bigr), \qquad \text{reject } H_0 \Leftrightarrow \lvert\mathrm{TS}_{\mathrm{ref}}\rvert > 3$$
 
-For selected dimension metrics (**ELLNER** by default; optionally **TAKENS** or **TAKENS+ELLNER**) and for **LLE**, `hypothesis.py` first generates $B$ stationary-bootstrap pseudo-series (default $B=100$). It computes:
+where $\mathrm{SF}_t(x, df) = 1 - F_t(x, df)$ is the upper-tail survival function of the Student-$t$ distribution (MATLAB equivalent: `2*(1 - tcdf(|TS|, B-1))`). The implementation uses `scipy.stats.t.sf` rather than `1 - cdf(...)` because typical rejection-region p-values are $10^{-3}\ldots 10^{-5}$, where `1 - cdf` loses precision; the survival-function path stays accurate in that tail.
 
-- $\overline{T}_{\mathrm{boot}}$ — mean of the $B$ bootstrap invariant values,
-- $s_{\mathrm{boot}}$ — sample SD of the $B$ values,
-- $T_{\mathrm{resh}}$ — invariant on one fully reshuffled series,
-- $\mathrm{TS}$ as above.
+For selected dimension metrics (**ELLNER** by default; optionally **TAKENS** or **TAKENS+ELLNER**) and for **LLE**, `hypothesis.py` first generates $B$ stationary-bootstrap pseudo-series (default $B=100$). It then computes, per metric:
 
-If $|\mathrm{TS}| > 3$, the null that the series is independent noise is rejected (evidence of structure/memory, not proof of chaos). At the current stage:
+- $\overline{T}_{\mathrm{boot}}$ — mean of the finite bootstrap invariant values,
+- $s_{\mathrm{boot}}$ — sample SD of the finite bootstrap values,
+- $B_{\mathrm{eff}}$ — count of finite bootstrap values (drives the p-value df),
+- $T_{\mathrm{ref}}$ — invariant on each of the three reference series (`surr`, `normal`, `t3.5`),
+- $\mathrm{TS}_{\mathrm{ref}}$ and $p_{\mathrm{ref}}$ as above for each reference.
+
+If $\lvert\mathrm{TS}_{\mathrm{ref}}\rvert > 3$, the null hypothesis represented by that particular reference is rejected (evidence of structure/memory, not proof of chaos). A metric that rejects $H_0$ against **all three** references is the strongest evidence of nonlinear structure; rejection against `surr` alone usually only reflects departure from the multi-set null. The aggregate top-level column `rej_all` keeps the historical meaning — `YES` only when every active metric rejects $H_0$ against the `surr` reference — and per-reference rejections live in the per-source detail block of `_hypothesis_aggregate_summary.txt`.
+
+At the current stage:
 
 - **TAKENS:** `d2.exe` → `.c2`; `c2t.exe` → $d_2^{(T)}(r')$ (eqs. 8.75–8.76). Plateau mean at $m=3$ is **TAKENS**; $s_{\mathrm{boot}}$ is the SD across bootstrap replicates.
 - **ELLNER:** same plateau defines $r_{\min}, r_{\max}$; eq. 8.78:
@@ -1025,26 +1043,39 @@ No active `_bootstrap_summary.txt` naming should be used.
 
 ## How to Read Surrogate Results
 
-In each `<BASE>_surrogate_summary.txt`, key columns are:
+Each `<BASE>_surrogate_summary.txt` contains two related blocks:
 
-- `orig` - invariant value on the original series,
-- `resh` / `surr` - invariant value on one fully reshuffled series,
-- `normal`, `t3.5` - descriptive reference invariant values where recomputed,
-- `boot_mean` - arithmetic mean of the stationary-bootstrap invariant values,
-- `boot_sd` - sample SD of the stationary-bootstrap invariant values,
-- `B` - number of stationary-bootstrap pseudo-series, default **100**,
-- `TS` - `(boot_mean-resh)/boot_sd`,
-- `abs_TS` - absolute value of `TS`,
-- `decision` - per-metric `reject H0`, `fail to reject H0`, `insufficient data`, `no sd`, or `not bootstrap-tested`.
+1. **Step 0 — invariant comparison against noise references** (descriptive). One row per metric with the original-series invariant alongside its value on each reference (`resh`, `normal`, `t3.5`). No statistical decision attached.
+2. **Invariant × reference table** (formal test). **One row per (metric, reference)** with the bootstrap centre/SD and the full TS / p-value / decision triple for that pair.
+
+Columns in the per-reference table:
+
+- `Invariant` — metric name (`TAKENS`, `ELLNER`, `LLE`, `RR`, `DET`, `LAM`, `MAXLINE`, `ENTR`, `TT`, `TREND`),
+- `ref` — reference series being tested (`surr`, `normal`, `t3.5`); the row repeats three times per metric so each null is judged independently,
+- `boot_mean` — arithmetic mean of the finite stationary-bootstrap invariant values,
+- `boot_sd` — sample SD of the finite stationary-bootstrap invariant values,
+- `B` — count of finite bootstrap invariant values used for `boot_mean` / `boot_sd` (the p-value uses `df = B − 1`),
+- `orig` — invariant value on the original series,
+- `ref_val` — invariant value on the chosen reference series (`surr` → reshuffle, `normal` → Gaussian, `t3.5` → Student-$t$),
+- `TS` — $(\overline{T}_{\mathrm{boot}} - T_{\mathrm{ref}}) / s_{\mathrm{boot}}$,
+- `abs_TS` — $\lvert\mathrm{TS}\rvert$,
+- `p_value` — two-sided Student-$t$ p-value with `df = B − 1` (fixed-point above $10^{-3}$, scientific notation below — that's the typical rejection-region scale),
+- `decision` — per-(metric, reference) `reject H0`, `fail to reject H0`, `insufficient data`, `no sd`, or `not bootstrap-tested`.
+
+A per-metric **Conclusion** line at the bottom summarises decisions across the three references and adds an `[any reject]` / `[no rejection]` rollup, e.g.:
+
+```text
+  ELLNER    : surr=reject H0 | normal=reject H0 | t3.5=reject H0   [any reject]
+```
 
 Interpretation:
 
-- $|\mathrm{TS}| > 3$: reject $H_0$ for that metric (structure/memory vs. reshuffle),
-- otherwise: fail to reject $H_0$,
-- `nan` / `insufficient data` / `no sd`: bootstrap or reshuffle values missing (common for **LLE** on very short test windows),
+- $\lvert\mathrm{TS}_{\mathrm{ref}}\rvert > 3$ (equivalently small `p_value`): reject $H_0$ against that particular reference (structure/memory beyond that null),
+- rejecting against **all three** references = strongest evidence of nonlinear structure; rejecting only against `surr` usually means departure from the multi-set null,
+- `nan` / `insufficient data` / `no sd`: bootstrap or reference values missing (common for **LLE** on very short test windows),
 - `not bootstrap-tested`: RQA with `--rqa_bootstrap off`, or metrics outside the active bootstrap set.
 
-When `print_results.py boot_aggregate` builds the compact table, column **`rej_all`** is **YES** only if every bootstrap-tested metric in that summary rejects `H0`.
+When `print_results.py boot_aggregate` builds the compact CSV-style top table, the column **`rej_all`** retains its historical meaning — **YES** only if every bootstrap-tested metric rejects $H_0$ against the **`surr`** reference (primary null). Per-reference rejections live in the per-source detail block immediately below the CSV, where each metric expands into three rows (one per reference) with `TS`, `|TS|`, `p-value`, and `decision`.
 
 ---
 
@@ -1083,7 +1114,7 @@ Operational notes:
 - `hypothesis.py` - thin **CLI entry point + re-exports** (`extract_lle_ols`, `find_best_lle_block`, `compute_invariants`, `compute_percentile_radius`, `format_rqa_radius`, …); backward-compatible facade for `rqa_radius.py` and `plot_lyap_k_output.py`.
 - `hypothesis_cli.py` - argparse, **`SeedSequence.spawn(2)`** for surrogate vs bootstrap streams, stationary bootstrap, TS table, summary writer, LLE diagnostic plot.
 - `hypothesis_config.py` - shared constants (`M_D2`, `M_LYAP`, `RQA_EMBEDDING_DIM`, `DEFAULT_BOOTSTRAP_SAMPLES`, `DEFAULT_TS_THRESHOLD`, …) and metric registry (`ALL_METRICS`, `BOOTSTRAP_TEST_METRICS`, `NULL_SERIES_METRICS`).
-- `hypothesis_surrogates.py`, `hypothesis_ts.py` - reference series (`randperm`, Gaussian, Student-t) and TS decision rule.
+- `hypothesis_surrogates.py`, `hypothesis_ts.py` - reference series (`randperm`, Gaussian, Student-t) and per-reference TS / Student-$t$ p-value decision rule.
 - `invariants_compute.py` - dispatch `compute_invariants()` (TISEAN + PyRQA per metric set); optional `lyap_keep_path` for the LLE diagnostic plot.
 - `invariants_correlation.py`, `invariants_lyapunov.py`, `invariants_rqa.py` - metric extractors (plateau detection, OLS LLE selection by quality, percentile-radius PyRQA stack).
 - `tisean_io.py` - `run_d2`, `run_c2t`, `run_lyap_k`, parsers; all three TISEAN wrappers now use the **`cwd` + basename** long-path workaround.

@@ -1409,6 +1409,8 @@ py -3 2dc.py
 
 Same scaling idea (count occupied ε-boxes in embedding space); here it is **implemented directly** so you do not depend on TISEAN’s grid conventions for this diagnostic.
 
+&nbsp;
+
 ---
 
 # Correlation Dimension Pipeline — Implementation Notes
@@ -1421,8 +1423,10 @@ Same scaling idea (count occupied ε-boxes in embedding space); here it is **imp
 4. [invariants_correlation.py — plateau picker + Ellner number](#4-invariants_correlationpy--plateau-picker--ellner-number)
 5. [How this gets called per series](#5-how-this-gets-called-per-series)
 6. [TL;DR data-flow diagram](#tldr-data-flow-diagram)
+
+&nbsp;
+
 ---
- 
 ## Background
  
 The Grassberger–Procaccia correlation integral is:
@@ -1445,6 +1449,9 @@ $$\hat{d}_2^{(E)} = \frac{C^{(m)}(r_{\max}) - C^{(m)}(r_{\min})}{\displaystyle\i
  
 The plateau interval $[r_{\min},\, r_{\max}]$ is shared between the two estimators by construction.
  
+
+&nbsp;
+
 ---
  
 ## 1. `d2.c` — building C⁽ᵐ⁾(r) on a geometric ε-grid
@@ -1513,6 +1520,9 @@ if (labs((long)(element-n1)) > MINDIST) {
  
 The pair-count normaliser `lnorm` (lines 481–490) is decremented by the number of indices that fall inside the Theiler window around `scr[n]`, so the denominator of $C^{(m)}$ remains consistent.
  
+&nbsp;
+
+---
 ### Step 1c — output files (per m = 1 … 10)
  
 Every ~120 s or at the end of the run, `d2.c` flushes three files:
@@ -1559,6 +1569,9 @@ The thesis uses `.d2` only for diagnostic plotting; the active dimension number 
  
 Blocks for distinct `m` are separated by `#dim=` headers and two blank lines — exactly the format `tisean_io.extract_tagged_block` later parses.
  
+
+&nbsp;
+
 ---
  
 ## 2. `correlation_dimension.bat` — orchestration
@@ -1622,6 +1635,9 @@ cmd = [
  
 `%DIMENSION_METRICS%` defaults to `ELLNER`. From here the `.bat` is no longer involved; the bootstrap loop happens entirely in Python.
  
+
+&nbsp;
+
 ---
  
 ## 3. `c2t.f` — turning C⁽ᵐ⁾(r) into d₂⁽ᵀ⁾(r')
@@ -1685,6 +1701,9 @@ i.e. equation (8.76) evaluated at every grid point of the original `.c2` block. 
  
 > **Note:** The lower limit is $r_1$, not $0$ — this is the inherent weakness of the raw Takens estimator that Ellner later patches. If there is no scaling below the smallest sampled ε, `cint` starts from "whatever the data shows there" instead of from zero. That is why we treat the resulting $\hat{d}_2^{(T)}(r')$ curve as a scan, find a plateau on it, and then re-integrate on only the plateau interval in the Ellner step.
  
+
+&nbsp;
+
 ---
  
 ## 4. `invariants_correlation.py` — plateau picker + Ellner number
@@ -1827,6 +1846,9 @@ $$\int_{r_{\min}}^{r_{\max}} \frac{C(r)}{r}\,dr = \int_{\ln r_{\min}}^{\ln r_{\m
 The code therefore uses `np.trapezoid(c_sel, log_r_sel)`. The `d2.exe` ε-grid is exponentially spaced (Stage 1, `epsfactor`), so spacing in `ln r` is uniform and the trapezoidal rule converges nicely; spacing in linear `r` is wildly non-uniform and would systematically over-weight large-`r` segments.
  
 3. **Sequential NaN gates.** Every degenerate case (empty `.c2`, bad bounds, fewer than 2 points in the plateau, non-monotone or non-positive endpoints, zero or negative integral) returns `np.nan` cleanly. That matters during the bootstrap because a single pathological surrogate must not crash the B-iteration loop — it shows up as an extra `NaN` in the bootstrap distribution, which `hypothesis_ts.invariant_bootstrap_ts_test` filters out before computing the test statistic.
+
+&nbsp;
+
 ---
  
 ## 5. How this gets called per series
@@ -1869,6 +1891,9 @@ $$TS_{\text{ELLNER}} = \frac{\hat{d}_2^{(E)}{}_{\text{orig}} - \overline{\hat{d}
  
 and the thesis decision rule is $|TS_{\text{ELLNER}}| \geq 3$.
  
+
+&nbsp;
+
 ---
  
 ## TL;DR data-flow diagram
@@ -1914,6 +1939,9 @@ compute_ellner_from_c2(<base>.c2, r_min, r_max, dim=3)
 2. **The plateau interval is shared.** TAKENS, ELLNER, and even the "edge touched" warning are all anchored on the one $[r_{\min},\, r_{\max}]$ pair the picker returned for the $m = 3$ block. Changing `select_plateau_values` changes both scalars at once.
 3. **Geometric grid → log-r quadrature.** Every integral on the Python side integrates in $\ln r$, because the underlying `d2.exe` ε-grid is exponentially spaced. Using a linear-$r$ trapezoid would be a silent systematic bias toward the large-$r$ tail.
 
+
+&nbsp;
+
 ---
 
 # Largest Lyapunov Exponent Pipeline — Implementation Notes
@@ -1958,6 +1986,9 @@ The two practical choices the implementation has to make are:
 2. **Which interval $[t_{\text{lo}}, t_{\text{hi}}]$ is "the linear region."** It has to be long enough to make the slope statistically meaningful and short enough to be in the linear regime (before the curve saturates at the attractor diameter).
 Everything below is the machinery for those two choices.
  
+
+&nbsp;
+
 ---
  
 ## 1. `lyap_k.c` — building S(t, m, ε)
@@ -2144,6 +2175,9 @@ Columns are: `t` (iteration), `S(t)`, `count[i][t]` (# reference points whose ne
  
 For an `m_min..m_max` sweep of 3..10 with 5 ε-values, that's 40 blocks per series — but only the `dim=3` blocks contribute to the hypothesis-test number.
  
+
+&nbsp;
+
 ---
  
 ## 2. `Lambda_max.bat` — orchestration
@@ -2198,6 +2232,9 @@ echo [INFO] FULL MODE - using complete files
  
 Without that block, a previous test run that set `DCH_LYAP_STEPS=200` in the parent shell would silently degrade the full pipeline.
  
+
+&nbsp;
+
 ---
  
 ## 3. `tisean_io.run_lyap_k` — the bootstrap-path `lyap_k` call
@@ -2237,6 +2274,9 @@ Three details that matter:
 3. **`cwd = dir(output_file)` + basename argument** — same FORTRAN path-truncation workaround as for `d2.exe` / `c2t.exe`.
 The output file is `<prefix>_lyap.txt`, kept in a per-series temp directory inside `invariants_compute.compute_invariants` for the duration of one estimation, then deleted (unless the caller passed `lyap_keep_path` for the LLE diagnostic plot).
  
+
+&nbsp;
+
 ---
  
 ## 4. `invariants_lyapunov.py` — parsing, linear window, OLS
@@ -2432,6 +2472,9 @@ Returns three things:
  
 The `INFO` log is the robustness check: median and spread of slopes across all usable ε-blocks (at the same `m`), to make obvious when the chosen block is an outlier relative to its peers. The wording makes explicit that "5 ε-blocks at m=3" is a length-scale sweep, not an embedding sweep.
  
+
+&nbsp;
+
 ---
  
 ## 5. How this gets called per series
@@ -2483,6 +2526,9 @@ $$TS_{\text{LLE}} = \frac{\lambda_{\text{orig}} - \overline{\lambda_{\text{boot}
  
 and the thesis decision rule is $|TS_{\text{LLE}}| \geq 3$. The within-series `std_err` returned by `extract_lle_ols` is reported in `out_std["LLE"]` for context, but the test statistic uses the bootstrap-distribution SD, not the single-series OLS `std_err`.
  
+
+&nbsp;
+
 ---
  
 ## TL;DR data-flow diagram
@@ -2530,6 +2576,9 @@ and the thesis decision rule is $|TS_{\text{LLE}}| \geq 3$. The within-series `s
 1. **`lyap_k.c` builds $S(t)$ exactly once per $(m, \varepsilon)$; the slope decision is purely Python-side.** TISEAN never tries to extract λ itself. That is on purpose — the linear-region choice is the only part of the algorithm with real methodological discretion, and the project keeps it under version control instead of inside the C binary.
 2. **Two parallel quality criteria:** ε is chosen on $(t_{\text{hi}} - t_{\text{lo}}) / \text{std\_err}$ (the block selector), and the $t$-window is chosen on $|\rho| \geq 0.99$ with a max-$|\rho|$ fallback (the per-block window selector). Both are configurable in code (`R2_THRESHOLD = 0.99`, `MIN_LYAP_LINEAR_POINTS = 3`) but neither is exposed as user config — they're "calibrated for hourly-return-scale chaos" defaults.
 3. **`std_err` reported by `extract_lle_ols` is a within-series fit error, not the statistical uncertainty used by the hypothesis test.** The decision-grade SD is computed across the $B = 1000$ stationary-bootstrap $\lambda$ estimates by `hypothesis_ts.invariant_bootstrap_ts_test`. The two SDs answer different questions: the OLS `std_err` says "how good is the linear fit to this one $S(t)$ curve?"; the bootstrap SD says "how stable is λ under temporal resampling of the original series?". Both are reported, but only the second one enters the $|TS| \geq 3$ rule.
+
+
+&nbsp;
 
 ---
 

@@ -423,31 +423,55 @@ def main():
         pass
 
     # ------------------------------------------------------------------
-    # 4. Bootstrap TS test: stationary bootstrap centre/SD vs reshuffle
+    # 4. Bootstrap TS test against THREE reference series
     # ------------------------------------------------------------------
     #
-    # TAKENS/ELLNER/LLE receive a TS decision. All scalar-only RQA metrics are
-    # marked "not bootstrap-tested" so downstream tables can distinguish
-    # unavailable tests from failed rejections.
-    test_stats = {}
-    abs_test_stats = {}
-    decisions = {}
+    # TAKENS / ELLNER / LLE (and bootstrap-enabled RQA scalars) receive a TS
+    # decision per reference series: ``surr`` (random permutation),
+    # ``normal`` (Gaussian with matched mu_r / sigma_r) and ``t<T_DOF>``
+    # (scaled Student-t). Each reference is an independent realisation of a
+    # different null hypothesis:
+    #
+    #   surr   -> "the invariant is just an artefact of the multi-set of
+    #             values" (any ordering would produce the same number).
+    #   normal -> "the invariant is what you would get from i.i.d. Gaussian
+    #             noise with matched first two moments".
+    #   t<DOF> -> same as normal but with the project's heavy-tailed reference
+    #             (DOF = 3.5 matches financial log-returns far better than
+    #             Gaussian).
+    #
+    # The bootstrap centre / SD are shared across all three tests — only the
+    # reference value in the numerator changes — so the denominator df for the
+    # Student-t p-value is the same ``B - 1`` in every cell.
+    test_stats = {m: {} for m in metric_names}
+    abs_test_stats = {m: {} for m in metric_names}
+    p_values = {m: {} for m in metric_names}
+    decisions = {m: {} for m in metric_names}
+
+    ref_keys = ["surr", "normal", f"t{T_DOF}"]
 
     for metric in metric_names:
         if metric in active_bootstrap:
-            ts, abs_ts, dec = invariant_bootstrap_ts_test(
-                bootstrap_mean.get(metric, np.nan),
-                bootstrap_sd.get(metric, np.nan),
-                results["surr"].get(metric, np.nan),
-                args.ts_threshold,
-            )
-            test_stats[metric] = ts
-            abs_test_stats[metric] = abs_ts
-            decisions[metric] = dec
+            bm = bootstrap_mean.get(metric, np.nan)
+            bs = bootstrap_sd.get(metric, np.nan)
+            bn = bootstrap_n.get(metric, 0)
+            for ref_key in ref_keys:
+                ref_val = results.get(ref_key, {}).get(metric, np.nan)
+                ts, abs_ts, p_val, dec = invariant_bootstrap_ts_test(
+                    bm, bs, ref_val,
+                    n_bootstrap=bn,
+                    threshold=args.ts_threshold,
+                )
+                test_stats[metric][ref_key] = ts
+                abs_test_stats[metric][ref_key] = abs_ts
+                p_values[metric][ref_key] = p_val
+                decisions[metric][ref_key] = dec
         else:
-            test_stats[metric] = np.nan
-            abs_test_stats[metric] = np.nan
-            decisions[metric] = "not bootstrap-tested"
+            for ref_key in ref_keys:
+                test_stats[metric][ref_key] = np.nan
+                abs_test_stats[metric][ref_key] = np.nan
+                p_values[metric][ref_key] = np.nan
+                decisions[metric][ref_key] = "not bootstrap-tested"
 
     # ------------------------------------------------------------------
     # 5. summary
@@ -509,9 +533,14 @@ def main():
                 "  RQA   — one PyRQA value per metric on the full original series only.\n"
             )
         fh.write(
-            "Test: TS=(mean_bootstrap(invariant)-invariant_reshuffle)/SD_bootstrap(invariant).\n"
+            "Test: TS=(mean_bootstrap(invariant) - invariant_reference)/SD_bootstrap(invariant).\n"
             f"  Decision: reject H0 if |TS| > {args.ts_threshold:g}; this indicates structure/memory as a prerequisite for chaos, not proof of chaos.\n"
-            "  Normal and t-series are reported as reference benchmarks, not as the main test pair.\n"
+            "  p-value: two-sided under Student-t with df = B - 1 (matches MATLAB '2*(1 - tcdf(|TS|, B-1))').\n"
+            "  The TS test is repeated against THREE reference series per metric:\n"
+            "    surr   = random permutation of the original (multi-set null)\n"
+            "    normal = Gaussian N(mu_r, sigma_r) of same length\n"
+            f"    t{T_DOF}   = scaled Student-t(nu={T_DOF}) of same length\n"
+            "  Each reference is an independent null; the per-reference decision is reported below.\n"
             "Invariant value sources:\n"
             "  TAKENS — mean of the stable plateau of the c2t Takens-Theiler curve d_2^(T)(r') for m=3\n"
             "  ELLNER — Ellner extension (eq. 8.78) computed from .c2 over [r_min, r_max] auto-detected\n"
@@ -560,23 +589,39 @@ def main():
                 "  Interpretation: compare original invariant values directly with reshuffle, Gaussian, and t(3.5) references.\n\n"
             )
 
-        # --- Invariant values table ---
-        # This is the primary machine-parsed table. Keep column order stable
-        # unless print_results.py is updated at the same time.
+        # --- Invariant × reference table (machine-parsed) ---
+        # One row per (metric, reference). The reference column is the
+        # primary key for downstream parsers in print_results.py /
+        # documents.py — keep its label tokens ('surr', 'normal',
+        # f't{T_DOF}') stable.
+        def _pf(v, w=col_w):
+            """Format a p-value: use scientific notation for very small values
+            so the 3-sigma decision region (p ~ 1e-3 .. 1e-5) keeps precision
+            inside a fixed-width column."""
+            if not np.isfinite(v):
+                return f"{'nan':>{w}}"
+            if v < 1e-3:
+                return f"{v:>{w}.3e}"
+            return f"{v:>{w}.4f}"
+
         hdr_parts = [
             f"{'Invariant':<12}",
+            f"{'ref':<8}",
             f"{'boot_mean':>{col_w}}",
             f"{'boot_sd':>{col_w}}",
             f"{'B':>{6}}",
+            f"{'orig':>{col_w}}",
+            f"{'ref_val':>{col_w}}",
+            f"{'TS':>{col_w}}",
+            f"{'abs_TS':>{col_w}}",
+            f"{'p_value':>{col_w}}",
+            f"{'decision':<26}",
         ]
-        for lbl in labels_ordered:
-            hdr_parts.append(f"{lbl:>{col_w}}")
-        hdr_parts += [f"{'TS':>{col_w}}", f"{'abs_TS':>{col_w}}", f"{'decision':<26}"]
         hdr = "  " + "  ".join(hdr_parts)
         fh.write(hdr + "\n")
         fh.write("  " + "-" * (len(hdr) - 2) + "\n")
 
-        print(f"\n  --- Invariant table ---")
+        print(f"\n  --- Invariant × reference table ---")
         print(f"  {hdr.strip()}")
         print(f"  {'-' * (len(hdr) - 2)}")
 
@@ -584,22 +629,40 @@ def main():
             bm = bootstrap_mean.get(metric, np.nan)
             bs = bootstrap_sd.get(metric, np.nan)
             bn = bootstrap_n.get(metric, 0)
-            row_parts = [f"{metric:<12}", _f(bm), _f(bs), f"{bn:>6}"]
-            for lbl in labels_ordered:
-                row_parts.append(_f(results[lbl][metric]))
-            row_parts.append(_f(test_stats[metric]))
-            row_parts.append(_f(abs_test_stats[metric]))
-            row_parts.append(f"  {decisions[metric]:<26}")
-            row = "  " + "  ".join(row_parts)
-            fh.write(row + "\n")
-            print(f"  {row.strip()}")
+            orig_v = results.get("orig", {}).get(metric, np.nan)
+            for ref_key in ref_keys:
+                ref_v = results.get(ref_key, {}).get(metric, np.nan)
+                row_parts = [
+                    f"{metric:<12}",
+                    f"{ref_key:<8}",
+                    _f(bm),
+                    _f(bs),
+                    f"{bn:>6}",
+                    _f(orig_v),
+                    _f(ref_v),
+                    _f(test_stats[metric].get(ref_key, np.nan)),
+                    _f(abs_test_stats[metric].get(ref_key, np.nan)),
+                    _pf(p_values[metric].get(ref_key, np.nan)),
+                    f"  {decisions[metric].get(ref_key, 'n/a'):<26}",
+                ]
+                row = "  " + "  ".join(row_parts)
+                fh.write(row + "\n")
+                print(f"  {row.strip()}")
 
         # --- Conclusion ---
-        # Repeat decisions in a compact block for quick console reading.
+        # Compact summary: per-metric decision against each reference, plus a
+        # roll-up "any reference rejects" flag for quick visual scanning.
         fh.write(f"\nConclusion (TS threshold={args.ts_threshold:g}):\n")
         print(f"\n  Conclusion (TS threshold={args.ts_threshold:g}):")
         for metric in metric_names:
-            line = f"  {metric:<10}: {decisions[metric]}"
+            per_ref = " | ".join(
+                f"{rk}={decisions[metric].get(rk, 'n/a')}" for rk in ref_keys
+            )
+            any_reject = any(
+                decisions[metric].get(rk) == "reject H0" for rk in ref_keys
+            )
+            rollup = "any reject" if any_reject else "no rejection"
+            line = f"  {metric:<10}: {per_ref}   [{rollup}]"
             fh.write(line + "\n")
             print(line)
 

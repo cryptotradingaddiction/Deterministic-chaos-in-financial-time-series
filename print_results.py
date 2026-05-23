@@ -502,7 +502,9 @@ def _parse_bootstrap_summary(path):
     except OSError:
         return None
 
-    # Current hypothesis.py format: stationary-bootstrap TS test for TAKENS/ELLNER/LLE.
+    # Current hypothesis.py format: stationary-bootstrap TS test against
+    # three reference series (surr / normal / t<DOF>) per metric. One row per
+    # (metric, reference) in the body.
     m = re.search(r"Stationary-bootstrap hypothesis test\s+\(([^)]+)\)", text)
     if m:
         info["format"] = "stationary_bootstrap_ts"
@@ -521,21 +523,97 @@ def _parse_bootstrap_summary(path):
             info["n"] = nm.group(1)
         info["mode"] = "FULL" if "full" in path.lower() else ("TEST" if "test" in path.lower() else "")
 
+        # Per-reference layout written by hypothesis_cli (May 2026 onward):
+        #   <metric>  <ref>  boot_mean  boot_sd  B  orig  ref_val  TS  abs_TS  p_value  decision
+        # The ``<ref>`` token is one of ``surr``, ``normal`` or ``t<dof>``;
+        # p-value may be ``nan``, fixed-point, or scientific notation (small
+        # rejection-region values get printed as ``1.234e-05``).
+        float_tok = r"-?(?:nan|inf|\d*\.?\d+(?:[eE][+-]?\d+)?)"
         row_re_boot = re.compile(
-            r"^(?P<name>D2|K2|TAKENS|ELLNER|LLE|RR|DET|LAM|MAXLINE|ENTR|TT|TREND)\s+"
-            r"(?P<boot_mean>-?(?:nan|inf|\d+\.\d+))\s+"
-            r"(?P<boot_sd>-?(?:nan|inf|\d+\.\d+))\s+"
-            r"(?P<B>\d+)\s+"
-            r"(?P<orig>-?(?:nan|inf|\d+\.\d+))\s+"
-            r"(?P<resh>-?(?:nan|inf|\d+\.\d+))\s+"
-            r"(?P<normal>-?(?:nan|inf|\d+\.\d+))\s+"
-            r"(?P<tref>-?(?:nan|inf|\d+\.\d+))\s+"
-            r"(?P<TS>-?(?:nan|inf|\d+\.\d+))\s+"
-            r"(?P<absTS>-?(?:nan|inf|\d+\.\d+))\s+"
-            r"(?P<decision>reject H0|fail to reject H0|insufficient data|no sd|not bootstrap-tested)\s*$"
+            rf"^(?P<name>D2|K2|TAKENS|ELLNER|LLE|RR|DET|LAM|MAXLINE|ENTR|TT|TREND)\s+"
+            rf"(?P<ref>surr|normal|t[\d.]+)\s+"
+            rf"(?P<boot_mean>{float_tok})\s+"
+            rf"(?P<boot_sd>{float_tok})\s+"
+            rf"(?P<B>\d+)\s+"
+            rf"(?P<orig>{float_tok})\s+"
+            rf"(?P<ref_val>{float_tok})\s+"
+            rf"(?P<TS>{float_tok})\s+"
+            rf"(?P<absTS>{float_tok})\s+"
+            rf"(?P<pvalue>{float_tok})\s+"
+            rf"(?P<decision>reject H0|fail to reject H0|insufficient data|no sd|not bootstrap-tested)\s*$"
         )
+        # Legacy single-row layout (hypothesis.py before per-reference rows).
+        # Kept so already-written summaries on disk continue to parse for
+        # ``boot_aggregate`` / Word generation.
+        row_re_legacy = re.compile(
+            rf"^(?P<name>D2|K2|TAKENS|ELLNER|LLE|RR|DET|LAM|MAXLINE|ENTR|TT|TREND)\s+"
+            rf"(?P<boot_mean>{float_tok})\s+"
+            rf"(?P<boot_sd>{float_tok})\s+"
+            rf"(?P<B>\d+)\s+"
+            rf"(?P<orig>{float_tok})\s+"
+            rf"(?P<resh>{float_tok})\s+"
+            rf"(?P<normal>{float_tok})\s+"
+            rf"(?P<tref>{float_tok})\s+"
+            rf"(?P<TS>{float_tok})\s+"
+            rf"(?P<absTS>{float_tok})\s+"
+            rf"(?P<decision>reject H0|fail to reject H0|insufficient data|no sd|not bootstrap-tested)\s*$"
+        )
+
+        # In the new layout each metric appears 3x (one per reference). Store
+        # everything under metrics[name]["refs"][ref] and project the surr
+        # reference up to the legacy top-level keys so older downstream code
+        # still sees a single TS/abs_TS/decision per metric.
         for line in text.splitlines():
             rm = row_re_boot.match(line.strip())
+            if rm:
+                name = rm.group("name")
+                ref = rm.group("ref")
+                slot = info["metrics"].setdefault(name, {"refs": {}})
+                slot.setdefault("refs", {})
+                slot["refs"][ref] = {
+                    "boot_mean": _parse_float_tok(rm.group("boot_mean")),
+                    "boot_sd": _parse_float_tok(rm.group("boot_sd")),
+                    "B": int(rm.group("B")),
+                    "orig": _parse_float_tok(rm.group("orig")),
+                    "ref_val": _parse_float_tok(rm.group("ref_val")),
+                    "TS": _parse_float_tok(rm.group("TS")),
+                    "abs_TS": _parse_float_tok(rm.group("absTS")),
+                    "pvalue": _parse_float_tok(rm.group("pvalue")),
+                    "decision": rm.group("decision"),
+                }
+                # Top-level fields = surr's view (primary null). Overwrite
+                # whenever we see the surr row, but also fall back to the
+                # first-seen row so non-surr-only files still parse.
+                if ref == "surr" or "TS" not in slot:
+                    slot["orig"] = _parse_float_tok(rm.group("orig"))
+                    slot["std_orig"] = _parse_float_tok(rm.group("boot_sd"))
+                    slot["mean"] = _parse_float_tok(rm.group("ref_val")) if ref == "surr" else slot.get("mean", float("nan"))
+                    slot["std"] = float("nan")
+                    slot["n"] = int(rm.group("B"))
+                    slot["boot_mean"] = _parse_float_tok(rm.group("boot_mean"))
+                    slot["boot_sd"] = _parse_float_tok(rm.group("boot_sd"))
+                    slot["resh"] = _parse_float_tok(rm.group("ref_val")) if ref == "surr" else slot.get("resh", float("nan"))
+                    slot["TS"] = _parse_float_tok(rm.group("TS")) if ref == "surr" else slot.get("TS", float("nan"))
+                    slot["abs_TS"] = _parse_float_tok(rm.group("absTS")) if ref == "surr" else slot.get("abs_TS", float("nan"))
+                    slot["pvalue"] = _parse_float_tok(rm.group("pvalue")) if ref == "surr" else slot.get("pvalue", float("nan"))
+                    slot["F"] = slot["TS"]
+                    slot["score"] = slot["TS"]
+                # Project per-reference invariant values into the legacy
+                # 'normal' / 't_ref' top-level keys, plus the conclusion
+                # (decision for surr is the primary, but tag all three).
+                if ref == "normal":
+                    slot["normal"] = _parse_float_tok(rm.group("ref_val"))
+                if ref.startswith("t"):
+                    slot["t_ref"] = _parse_float_tok(rm.group("ref_val"))
+                # Conclusion lookup: the per-metric ":" line below carries
+                # the per-reference decisions in a compact " | "-joined
+                # string; the surr decision is the primary one for the
+                # rej_all aggregation.
+                if ref == "surr":
+                    info["conclusion"][name] = rm.group("decision")
+                continue
+
+            rm = row_re_legacy.match(line.strip())
             if not rm:
                 continue
             name = rm.group("name")
@@ -555,6 +633,19 @@ def _parse_bootstrap_summary(path):
                 "F": _parse_float_tok(rm.group("TS")),
                 "score": _parse_float_tok(rm.group("TS")),
                 "pvalue": float("nan"),
+                "refs": {
+                    "surr": {
+                        "boot_mean": _parse_float_tok(rm.group("boot_mean")),
+                        "boot_sd": _parse_float_tok(rm.group("boot_sd")),
+                        "B": int(rm.group("B")),
+                        "orig": _parse_float_tok(rm.group("orig")),
+                        "ref_val": _parse_float_tok(rm.group("resh")),
+                        "TS": _parse_float_tok(rm.group("TS")),
+                        "abs_TS": _parse_float_tok(rm.group("absTS")),
+                        "pvalue": float("nan"),
+                        "decision": rm.group("decision"),
+                    },
+                },
             }
             info["conclusion"][name] = rm.group("decision")
         return info
@@ -880,6 +971,43 @@ def cmd_boot_aggregate(path, _n=None):
         for _fp, info in parsed_infos
     ):
         is_stationary = all(info.get("format") == "stationary_bootstrap_ts" for _fp, info in parsed_infos)
+
+        # Resolve the t-reference label (e.g. ``t3.5``) by sampling the first
+        # info dict's per-reference keys. Falls back to ``t3.5`` when no
+        # ``refs`` block is present (older format on disk).
+        def _resolve_t_ref_key(infos):
+            for _fp, info in infos:
+                for m in info.get("metrics", {}).values():
+                    for rk in m.get("refs", {}):
+                        if rk.startswith("t"):
+                            return rk
+            return "t3.5"
+
+        t_ref_key = _resolve_t_ref_key(parsed_infos)
+        ref_keys = ("surr", "normal", t_ref_key)
+
+        def _ref_field(slot, ref, field, default=float("nan")):
+            """Pull a per-reference numeric field, falling back to legacy
+            top-level keys for ``surr`` (so old single-row summaries still
+            populate the surr column)."""
+            refs = slot.get("refs", {})
+            if ref in refs and field in refs[ref]:
+                return refs[ref][field]
+            if ref == "surr":
+                if field == "TS":
+                    return slot.get("TS", default)
+                if field == "abs_TS":
+                    return slot.get("abs_TS", default)
+                if field == "pvalue":
+                    return slot.get("pvalue", default)
+                if field == "ref_val":
+                    return slot.get("resh", default)
+            if ref == "normal" and field == "ref_val":
+                return slot.get("normal", default)
+            if ref.startswith("t") and field == "ref_val":
+                return slot.get("t_ref", default)
+            return default
+
         with open(out_path, "w", encoding="utf-8") as fh:
             fh.write("Hypothesis pipeline - aggregated summary\n")
             fh.write(f"Scanned root : {path}\n")
@@ -887,9 +1015,12 @@ def cmd_boot_aggregate(path, _n=None):
             fh.write("=" * 110 + "\n\n")
 
             w = 11
-            # NB: keep the `normal` and `t3.5` invariant columns next to the
-            # existing reshuffle column so downstream documents.py can pull
-            # the full Step-0 reference comparison from a single aggregate row.
+            # CSV-style top table: one row per coin. Per-metric block holds
+            # the bootstrap centre/SD, then one (ref_val, TS, p) triple for
+            # each of the three reference series. The surr column is also
+            # kept as ``<metric>_resh`` + ``TS_<metric>`` / ``absTS_<metric>``
+            # so older downstream code (documents.py prior to per-reference
+            # support) continues to work without modification.
             header = f"{'Symbol':<8} {'tau':>4} {'W':>3} {'B':>3}"
             for name in metric_names:
                 if is_stationary:
@@ -899,6 +1030,11 @@ def cmd_boot_aggregate(path, _n=None):
                         f" {f'{name}_normal':>{w}} {f'{name}_t3.5':>{w}}"
                         f" {f'TS_{name}':>{w}} {f'absTS_{name}':>{w}}"
                     )
+                    for ref in ref_keys:
+                        header += (
+                            f" {f'TS_{name}_{ref}':>{w}}"
+                            f" {f'p_{name}_{ref}':>{w}}"
+                        )
                 else:
                     header += (
                         f" {f'{name}_orig':>{w}} {f'{name}_orig_sd':>{w}}"
@@ -915,10 +1051,8 @@ def cmd_boot_aggregate(path, _n=None):
                 for name in metric_names:
                     m = info["metrics"].get(name)
                     if not m:
-                        row += (
-                            f" {'nan':>{w}} {'nan':>{w}} {'nan':>{w}} {'nan':>{w}}"
-                            f" {'nan':>{w}} {'nan':>{w}} {'nan':>{w}} {'nan':>{w}}"
-                        )
+                        nan_cells = 8 + (2 * len(ref_keys) if is_stationary else 0)
+                        row += "".join(f" {'nan':>{w}}" for _ in range(nan_cells))
                         continue
                     normal_val = m.get('normal', float('nan'))
                     tref_val = m.get('t_ref', float('nan'))
@@ -929,6 +1063,17 @@ def cmd_boot_aggregate(path, _n=None):
                             f" {normal_val:>{w}.4f} {tref_val:>{w}.4f}"
                             f" {m.get('TS', float('nan')):>{w}.4f} {m.get('abs_TS', float('nan')):>{w}.4f}"
                         )
+                        for ref in ref_keys:
+                            ts_v = _ref_field(m, ref, "TS")
+                            p_v = _ref_field(m, ref, "pvalue")
+                            ts_cell = f"{ts_v:>{w}.4f}" if np.isfinite(ts_v) else f"{'nan':>{w}}"
+                            if np.isfinite(p_v):
+                                p_cell = (
+                                    f"{p_v:>{w}.3e}" if p_v < 1e-3 else f"{p_v:>{w}.4f}"
+                                )
+                            else:
+                                p_cell = f"{'nan':>{w}}"
+                            row += f" {ts_cell} {p_cell}"
                     else:
                         row += (
                             f" {m['orig']:>{w}.4f} {m['std_orig']:>{w}.4f}"
@@ -936,6 +1081,9 @@ def cmd_boot_aggregate(path, _n=None):
                             f" {normal_val:>{w}.4f} {tref_val:>{w}.4f}"
                             f" {m['F']:>{w}.4f} {m['pvalue']:>{w}.4f}"
                         )
+                # rej_all uses the surr-reference decision (primary null) for
+                # consistency with the historical definition; per-reference
+                # rejections are visible in the per-source detail block below.
                 rej_all = (
                     "YES"
                     if all(info["conclusion"].get(n) == "reject H0" for n in metric_names)
@@ -946,11 +1094,17 @@ def cmd_boot_aggregate(path, _n=None):
 
             if is_stationary:
                 fh.write(
-                    "\nCurrent format: stationary-bootstrap TS test. "
-                    "boot = mean across B bootstrap invariant values, boot_sd = sample SD, "
-                    "surr/resh = one fully reshuffled invariant, TS=(boot-surr)/boot_sd. "
-                    "Active metrics include TAKENS/ELLNER/LLE and (when enabled) RQA scalars. "
-                    "Reject H0 when |TS|>3.\n\n"
+                    "\nCurrent format: stationary-bootstrap TS test against 3 null references.\n"
+                    "  boot     = mean across B stationary-bootstrap invariant values\n"
+                    "  boot_sd  = sample SD of the bootstrap invariant distribution\n"
+                    "  resh     = invariant on one random-permutation surrogate (null #1)\n"
+                    "  normal   = invariant on a Gaussian N(mu_r, sigma_r) series (null #2)\n"
+                    "  t3.5     = invariant on a scaled Student-t(3.5) series (null #3)\n"
+                    "  TS_<metric>            = TS against surr (kept for back-compat)\n"
+                    "  TS_<metric>_<ref>      = TS = (boot - <ref>) / boot_sd\n"
+                    "  p_<metric>_<ref>       = two-sided Student-t p-value with df = B - 1\n"
+                    "  rej_all                = YES iff every metric rejects H0 vs. surr (|TS| > 3)\n"
+                    "Per-reference decisions are listed inside each per-source block below.\n\n"
                 )
             else:
                 fh.write(
@@ -966,36 +1120,59 @@ def cmd_boot_aggregate(path, _n=None):
                 fh.write(f"  tau={info['tau']}, W={info['W']}, B={info['B']}\n")
                 if is_stationary:
                     fh.write(
-                        f"  {'metric':<8} {'orig':>10} {'boot':>10} {'boot_sd':>10} {'resh':>10} "
-                        f"{'normal':>10} {'t3.5':>10} {'B':>5} {'TS':>10} {'abs_TS':>10}  conclusion\n"
+                        f"  {'metric':<8} {'ref':<8} {'orig':>10} {'boot':>10} "
+                        f"{'boot_sd':>10} {'ref_val':>10} {'B':>5} {'TS':>10} "
+                        f"{'abs_TS':>10} {'p-value':>11}  decision\n"
                     )
+                    for name in metric_names:
+                        m = info["metrics"].get(name)
+                        if not m:
+                            for ref in ref_keys:
+                                fh.write(
+                                    f"  {name:<8} {ref:<8} {'nan':>10} {'nan':>10} {'nan':>10} "
+                                    f"{'nan':>10} {'nan':>5} {'nan':>10} {'nan':>10} {'nan':>11}  n/a\n"
+                                )
+                            continue
+                        for ref in ref_keys:
+                            ref_slot = m.get("refs", {}).get(ref, {})
+                            ts_v = _ref_field(m, ref, "TS")
+                            abs_v = _ref_field(m, ref, "abs_TS")
+                            p_v = _ref_field(m, ref, "pvalue")
+                            ref_val = _ref_field(m, ref, "ref_val")
+                            decision = ref_slot.get(
+                                "decision",
+                                info["conclusion"].get(name, "n/a") if ref == "surr" else "n/a",
+                            )
+                            p_cell = (
+                                f"{p_v:>11.3e}" if (np.isfinite(p_v) and p_v < 1e-3)
+                                else (f"{p_v:>11.4f}" if np.isfinite(p_v) else f"{'nan':>11}")
+                            )
+                            fh.write(
+                                f"  {name:<8} {ref:<8} {m['orig']:>10.4f} "
+                                f"{m.get('boot_mean', float('nan')):>10.4f} "
+                                f"{m.get('boot_sd', float('nan')):>10.4f} "
+                                f"{ref_val:>10.4f} {m['n']:>5} "
+                                f"{ts_v:>10.4f} {abs_v:>10.4f} {p_cell}  {decision}\n"
+                            )
                 else:
                     fh.write(
                         f"  {'metric':<8} {'orig':>10} {'orig_sd':>10} {'surr':>10} {'surr_sd':>10} "
                         f"{'normal':>10} {'t3.5':>10} {'n':>5} {'F':>10} {'p-value':>10}  conclusion\n"
                     )
-                for name in metric_names:
-                    m = info["metrics"].get(name, {})
-                    con = info["conclusion"].get(name, "n/a")
-                    if m:
-                        if is_stationary:
-                            fh.write(
-                                f"  {name:<8} {m['orig']:>10.4f} {m.get('boot_mean', float('nan')):>10.4f} "
-                                f"{m.get('boot_sd', float('nan')):>10.4f} {m.get('resh', float('nan')):>10.4f} "
-                                f"{m['normal']:>10.4f} {m['t_ref']:>10.4f} "
-                                f"{m['n']:>5} {m.get('TS', float('nan')):>10.4f} {m.get('abs_TS', float('nan')):>10.4f}  {con}\n"
-                            )
-                        else:
+                    for name in metric_names:
+                        m = info["metrics"].get(name, {})
+                        con = info["conclusion"].get(name, "n/a")
+                        if m:
                             fh.write(
                                 f"  {name:<8} {m['orig']:>10.4f} {m['std_orig']:>10.4f} "
                                 f"{m['mean']:>10.4f} {m['std']:>10.4f} "
                                 f"{m['normal']:>10.4f} {m['t_ref']:>10.4f} "
                                 f"{m['n']:>5} {m['F']:>10.4f} {m['pvalue']:>10.4f}  {con}\n"
                             )
-                    else:
-                        fh.write(
-                            f"  {name:<8} {'nan':>10} {'nan':>10} {'nan':>10} {'nan':>10} "
-                            f"{'nan':>10} {'nan':>10} {'nan':>5} {'nan':>10} {'nan':>10}  {con}\n"
+                        else:
+                            fh.write(
+                                f"  {name:<8} {'nan':>10} {'nan':>10} {'nan':>10} {'nan':>10} "
+                                f"{'nan':>10} {'nan':>10} {'nan':>5} {'nan':>10} {'nan':>10}  {con}\n"
                         )
                 fh.write("\n")
 

@@ -213,24 +213,31 @@ def _parse_aggregate_rows(path: Path) -> tuple[list[str], dict[str, dict[str, st
 
 @dataclass
 class SurrogateRow:
-    """One row in the surrogate/bootstrap results table (per coin × invariant).
+    """One row in the surrogate/bootstrap results table.
 
-    ``normal`` and ``t_ref`` carry the invariant value computed on the matched
-    Gaussian / Student-t reference series (not their TS statistics — they share
-    the bootstrap denominator with ``resh``). Empty / NaN when the upstream
-    aggregate is from an older format that did not emit those columns.
+    With per-reference TS tests, each coin × invariant is now expanded into
+    three rows — one per reference series (``surr``, ``normal``, ``t3.5``).
+    ``ref_label`` identifies which null is being tested in this row and
+    ``ref_value`` holds the invariant value computed on that reference
+    series. ``ts`` / ``abs_ts`` / ``pvalue`` / ``decision`` are specific to
+    that (metric, reference) pair.
+
+    The bootstrap centre / SD (``boot_mean`` / ``boot_sd``) are shared across
+    the three rows for one (coin, metric) — they describe the same
+    stationary-bootstrap distribution of the original-series invariant — so
+    they are repeated rather than left blank to make each row stand alone.
     """
 
     symbol: str
     invariant: str
+    ref_label: str
     orig: str
     boot_mean: str
     boot_sd: str
-    resh: str
-    normal: str
-    t_ref: str
+    ref_value: str
     ts: str
     abs_ts: str
+    pvalue: str
     decision: str
 
 
@@ -245,12 +252,37 @@ def _bootstrap_decision(abs_ts: str, threshold: float = 3.0) -> str:
     return "reject H0" if v > threshold else "fail to reject H0"
 
 
+def _format_pvalue(token: str) -> str:
+    """Format a p-value token: scientific for tiny rejection-region values,
+    fixed-point otherwise; ``nan`` stays ``nan``."""
+    import math
+
+    try:
+        v = float(token)
+    except (TypeError, ValueError):
+        return "nan"
+    if not math.isfinite(v):
+        return "nan"
+    if v < 1e-3:
+        return f"{v:.2e}"
+    return f"{v:.4f}"
+
+
+# Per-reference Czech labels for the Word table.
+_REF_LABELS_CS = {"surr": "reshuffle", "normal": "normal", "t3.5": "t(3.5)"}
+
+
 def _collect_surrogate_rows(config=None) -> list[SurrogateRow]:
     """
-    Flatten hypothesis aggregates into surrogate table rows for all coins × metrics.
+    Flatten hypothesis aggregates into surrogate table rows for all
+    (coins × metrics × reference series).
 
-    Reads ``_hypothesis_aggregate_summary.txt`` from dimension, LLE, and RQA result
-    trees (FULL or test_<N> via :func:`config_loader.hypothesis_*_dir`).
+    Reads ``_hypothesis_aggregate_summary.txt`` from dimension, LLE, and RQA
+    result trees (FULL or test_<N> via :func:`config_loader.hypothesis_*_dir`).
+    The aggregate emits one column triple per reference
+    (``TS_<metric>_<ref>``, ``p_<metric>_<ref>``, and the invariant value
+    column ``<metric>_<resh|normal|t3.5>``); this helper expands them into
+    one row per (coin, metric, ref) for the Word table.
     """
     cfg = config or load_config()
     dim_agg = hypothesis_correlation_dimension_dir(cfg) / "_hypothesis_aggregate_summary.txt"
@@ -270,6 +302,14 @@ def _collect_surrogate_rows(config=None) -> list[SurrogateRow]:
     }
     metric_order = ["TAKENS", "ELLNER", "LLE", "RR", "DET", "LAM", "MAXLINE", "ENTR", "TT", "TREND"]
     label = {"TAKENS": "D_T (Takens)", "ELLNER": "D_E (Ellner)"}
+    # Maps a reference key (used in column names) to the invariant-value
+    # column name in the aggregate. ``surr`` lives under ``<metric>_resh``
+    # for historical reasons (it predates the per-reference rewrite).
+    ref_value_column = {
+        "surr": "resh",
+        "normal": "normal",
+        "t3.5": "t3.5",
+    }
     parsed = {}
     for path in set(sources.values()):
         if path.exists():
@@ -280,26 +320,44 @@ def _collect_surrogate_rows(config=None) -> list[SurrogateRow]:
         for metric in metric_order:
             path = sources[metric]
             row = parsed.get(path, {}).get(sym, {})
-            abs_ts = _format_float_token(row.get(f"absTS_{metric}", "nan"))
-            out.append(
-                SurrogateRow(
-                    symbol=sym.replace("USD", ""),
-                    invariant=label.get(metric, metric),
-                    orig=_format_float_token(row.get(f"{metric}_orig", "nan")),
-                    boot_mean=_format_float_token(row.get(f"{metric}_boot", "nan")),
-                    boot_sd=_format_float_token(row.get(f"{metric}_boot_sd", "nan")),
-                    resh=_format_float_token(row.get(f"{metric}_resh", "nan")),
-                    # New: invariant values on the matched reference series.
-                    # The aggregate writes them as `<metric>_normal` and
-                    # `<metric>_t3.5` (see print_results.cmd_boot_aggregate).
-                    normal=_format_float_token(row.get(f"{metric}_normal", "nan")),
-                    t_ref=_format_float_token(row.get(f"{metric}_t3.5", "nan")),
-                    ts=_format_float_token(row.get(f"TS_{metric}", "nan")),
-                    abs_ts=abs_ts,
-                    decision=_bootstrap_decision(abs_ts),
+            for ref_key, value_col in ref_value_column.items():
+                ts_token = row.get(f"TS_{metric}_{ref_key}")
+                p_token = row.get(f"p_{metric}_{ref_key}")
+                # Fallback for surr when the aggregate is still in the
+                # legacy single-TS layout: TS lives under TS_<metric> /
+                # absTS_<metric> with no p-value column.
+                if ts_token is None and ref_key == "surr":
+                    ts_token = row.get(f"TS_{metric}", "nan")
+                if p_token is None:
+                    p_token = "nan"
+                abs_ts = _format_float_token(
+                    str(abs(float(ts_token))) if _is_finite_float(ts_token) else "nan"
                 )
-            )
+                out.append(
+                    SurrogateRow(
+                        symbol=sym.replace("USD", ""),
+                        invariant=label.get(metric, metric),
+                        ref_label=_REF_LABELS_CS.get(ref_key, ref_key),
+                        orig=_format_float_token(row.get(f"{metric}_orig", "nan")),
+                        boot_mean=_format_float_token(row.get(f"{metric}_boot", "nan")),
+                        boot_sd=_format_float_token(row.get(f"{metric}_boot_sd", "nan")),
+                        ref_value=_format_float_token(row.get(f"{metric}_{value_col}", "nan")),
+                        ts=_format_float_token(ts_token if ts_token is not None else "nan"),
+                        abs_ts=abs_ts,
+                        pvalue=_format_pvalue(p_token),
+                        decision=_bootstrap_decision(abs_ts),
+                    )
+                )
     return out
+
+
+def _is_finite_float(token) -> bool:
+    import math
+
+    try:
+        return math.isfinite(float(token))
+    except (TypeError, ValueError):
+        return False
 
 
 def _parse_series_stats_from_summary(path: Path) -> dict[str, tuple[str, str]]:
@@ -626,24 +684,29 @@ def write_doc(data: TableData) -> None:
     doc.add_heading(f"Výsledky surrogate testů ({mode_label})", level=1)
     doc.add_paragraph(
         "Stacionární bootstrap (B=100) původní řady poskytuje robustní střední hodnotu (boot_mean) "
-        "a směrodatnou odchylku (boot_sd) invariantu. Pro jednu plně přemíchanou (reshuffle) řadu se "
-        "spočítá tentýž invariant a vyhodnotí se testová statistika "
-        "TS = (boot_mean − reshuffle) / boot_sd. Hypotéza H0 (řada je pouhý nezávislý šum) se zamítá, "
-        "pokud |TS| > 3 — tedy existuje prokazatelná struktura/paměť coby předpoklad pro chaos, "
-        "nikoli důkaz chaosu. Test je k dispozici pro TAKENS, ELLNER, LLE a (při zapnutém "
-        "RQA bootstrapu v ``RQA.bat``) pro skalární RQA metriky; prázdné nebo ``nan`` buňky "
-        "znamenají ``insufficient data`` nebo vypnutý bootstrap. "
-        "Sloupce **normal** a **t3.5** uvádějí hodnotu téhož invariantu spočtenou na referenčních "
-        "řadách: Gaussova řada N(μ_r, σ_r) a Studentova t-řada s ν=3.5, obě s délkou jako originál "
-        "a stejnými prvními dvěma momenty. Slouží jako Step-0 srovnání: orig vs. nezávislé šumové "
-        "modely; formální TS rozhodnutí se nicméně počítá pouze z reshuffle vs. bootstrap. "
+        "a směrodatnou odchylku (boot_sd) invariantu. Pro každou ze tří referenčních řad se "
+        "spočítá tentýž invariant a vyhodnotí testová statistika "
+        "TS = (boot_mean − referenční hodnota) / boot_sd. Hypotéza H0 (řada je pouhý nezávislý šum "
+        "z daného nullového modelu) se zamítá, pokud |TS| > 3 — tedy existuje prokazatelná "
+        "struktura/paměť coby předpoklad pro chaos, nikoli důkaz chaosu. "
+        "P-hodnota se počítá dvoustranně ze Studentova rozdělení s df = B − 1 stupni volnosti "
+        "(odpovídá MATLABovskému ``p = 2*(1 - tcdf(|TS|, B-1))``); pro p < 10⁻³ je uvedena "
+        "ve vědeckém zápisu, jinak ve fixed-pointu. "
+        "Tři referenční řady tvoří tři nezávislé nullové hypotézy: "
+        "**reshuffle** = náhodná permutace originálu (nulová hypotéza „pořadí dat je irelevantní“), "
+        "**normal** = N(μ_r, σ_r) stejné délky (nulová hypotéza „data jsou i.i.d. gaussovský šum“), "
+        "**t(3.5)** = škálovaná Studentova t-řada s ν=3.5 (heavy-tailed null pasující na "
+        "finanční výnosy). "
+        "Test je k dispozici pro TAKENS, ELLNER, LLE a (při zapnutém RQA bootstrapu v "
+        "``RQA.bat``) pro skalární RQA metriky; prázdné nebo ``nan`` buňky znamenají "
+        "``insufficient data`` nebo vypnutý bootstrap. "
         "Parametry embedování (τ, m) a Theilerovo okno W vstupují do ``hypothesis.py`` jako "
         "``--delay`` a ``--theiler`` (stejné W jako v TISEAN dávkových skriptech a PyRQA)."
     )
 
     sur_headers = [
-        "Aktivum", "Invariant", "orig", "boot_mean", "boot_sd",
-        "reshuffle", "normal", "t3.5", "TS", "|TS|", "Rozhodnutí",
+        "Aktivum", "Invariant", "Reference", "orig", "boot_mean", "boot_sd",
+        "ref. hodnota", "TS", "|TS|", "p-hodnota", "Rozhodnutí",
     ]
     sur_table = doc.add_table(rows=1, cols=len(sur_headers))
     sur_table.style = "Table Grid"
@@ -655,14 +718,14 @@ def write_doc(data: TableData) -> None:
         vals = [
             row.symbol,
             row.invariant,
+            row.ref_label,
             row.orig,
             row.boot_mean,
             row.boot_sd,
-            row.resh,
-            row.normal,
-            row.t_ref,
+            row.ref_value,
             row.ts,
             row.abs_ts,
+            row.pvalue,
             row.decision,
         ]
         for i, value in enumerate(vals):
@@ -671,7 +734,7 @@ def write_doc(data: TableData) -> None:
     _format_table(
         sur_table,
         # 11 columns; widths sum to ~ 9.4 inches (fits landscape A4 with margins).
-        [0.65, 0.90, 0.72, 0.78, 0.72, 0.72, 0.72, 0.72, 0.72, 0.72, 1.20],
+        [0.60, 0.95, 0.75, 0.70, 0.78, 0.72, 0.85, 0.65, 0.65, 0.75, 1.10],
         font_size=7.0,
     )
 

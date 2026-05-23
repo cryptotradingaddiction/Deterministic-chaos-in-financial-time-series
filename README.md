@@ -12,7 +12,9 @@ This project combines:
 - log-return preprocessing,
 - invariant estimation via TISEAN,
 - recurrence quantification via `PyRQA`,
-- stationary-bootstrap testing of the original-series invariant against **three independent null reference series** (random permutation, Gaussian, Student-$t$ with $\nu=3.5$), with a `TS` decision rule **plus a two-sided Student-$t$ p-value** (df $= B-1$) for dimension metrics (`ELLNER` by default, optionally `TAKENS` or `TAKENS,ELLNER`), **LLE**, and (by default) **RQA** scalars.
+- stationary-bootstrap testing of the original-series invariant against **three independent null reference series** (random permutation, Gaussian, Student-$t$ with $\nu=3.5$), with a `TS` decision rule **plus a two-sided Student-t p-value** (df $= B-1$) for dimension metrics (`ELLNER` by default, optionally `TAKENS` or `TAKENS,ELLNER`), **LLE**, and (by default) **RQA** scalars.
+&nbsp;
+&nbsp;
 &nbsp;
 This repository serves as a storage for codebase used in my bachelor's thesis focused on "Determining the presence of deterministic chaos in financial time series", released in June 2026 in Czech, at Prague University of Economics and Business (VŠE v Praze).
 Link: 

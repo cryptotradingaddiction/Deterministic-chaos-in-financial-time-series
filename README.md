@@ -5,6 +5,9 @@
 ![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)
 ![TISEAN](https://img.shields.io/badge/TISEAN-orchestration-orange)
 &nbsp;
+This repository serves as a storage for codebase used in my bachelor's thesis focused on "Determining the presence of deterministic chaos in financial time series", released in June 2026 in Czech, at Prague University of Economics and Business (VŠE v Praze).
+Link:
+&nbsp; 
 End-to-end research pipeline for nonlinear analysis of cryptocurrency log-return time series, with distributed surrogate-based hypothesis testing.
 This project combines:
 &nbsp;
@@ -15,9 +18,7 @@ This project combines:
 - stationary-bootstrap testing of the original-series invariant against **three independent null reference series** (random permutation, Gaussian, Student-$t$ with $\nu=3.5$), with a `TS` decision rule **plus a two-sided Student-t p-value** (df $= B-1$) for dimension metrics (`ELLNER` by default, optionally `TAKENS` or `TAKENS,ELLNER`), **LLE**, and (by default) **RQA** scalars.
 &nbsp;
 &nbsp;
-&nbsp;
-This repository serves as a storage for codebase used in my bachelor's thesis focused on "Determining the presence of deterministic chaos in financial time series", released in June 2026 in Czech, at Prague University of Economics and Business (VŠE v Praze).
-Link: 
+&nbsp; 
 
 &nbsp;
 

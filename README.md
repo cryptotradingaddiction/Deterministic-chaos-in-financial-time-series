@@ -38,6 +38,18 @@ This project combines:
 - [Diagnostics: Mutual Information (`mutual.py`)](#diagnostics-mutual-information-mutualpy)
 - [Diagnostics: Cao Embedding Dimension (`cao_.py`)](#diagnostics-cao-embedding-dimension-caopy)
 - [Diagnostics: Capacity Dimension (`2dc.py`)](#diagnostics-capacity-dimension-2dcpy)
+- [d2.c — building C⁽ᵐ⁾(r) on a geometric ε-grid](#1-d2c--building-cm-r-on-a-geometric-ε-grid)
+- [correlation_dimension.bat — orchestration](#2-correlation_dimensionbat--orchestration)
+- [c2t.f — turning C⁽ᵐ⁾(r) into d₂⁽ᵀ⁾(r')](#3-c2tf--turning-cm-r-into-d2tr)
+- [invariants_correlation.py — plateau picker + Ellner number](#4-invariants_correlationpy--plateau-picker--ellner-number)
+- [How this gets called per series](#5-how-this-gets-called-per-series)
+- [TL;DR data-flow diagram](#tldr-data-flow-diagram)
+- [lyap_k.c — building S(t, m, ε)](#1-lyap_kc--building-st-m-ε)
+- [Lambda_max.bat — orchestration](#2-lambda_maxbat--orchestration)
+- [tisean_io.run_lyap_k — the bootstrap-path lyap_k call](#3-tisean_iorun_lyap_k--the-bootstrap-path-lyap_k-call)
+- [invariants_lyapunov.py — parsing, linear window, OLS](#4-invariants_lyapunovpy--parsing-linear-window-ols)
+- [How this gets called per series](#5-how-this-gets-called-per-series)
+- [TL;DR data-flow diagram](#tldr-data-flow-diagram)
 - [TISEAN Binaries Used (Active Pipeline)](#tisean-binaries-used-active-pipeline)
 - [Method Notes by Script](#method-notes-by-script)
 - [Desktop GUI](#desktop-gui)
@@ -1414,20 +1426,8 @@ Same scaling idea (count occupied ε-boxes in embedding space); here it is **imp
 ---
 
 # Correlation Dimension Pipeline — Implementation Notes
- 
-## Table of Contents
- 
-1. [d2.c — building C⁽ᵐ⁾(r) on a geometric ε-grid](#1-d2c--building-cm-r-on-a-geometric-ε-grid)
-2. [correlation_dimension.bat — orchestration](#2-correlation_dimensionbat--orchestration)
-3. [c2t.f — turning C⁽ᵐ⁾(r) into d₂⁽ᵀ⁾(r')](#3-c2tf--turning-cm-r-into-d2tr)
-4. [invariants_correlation.py — plateau picker + Ellner number](#4-invariants_correlationpy--plateau-picker--ellner-number)
-5. [How this gets called per series](#5-how-this-gets-called-per-series)
-6. [TL;DR data-flow diagram](#tldr-data-flow-diagram)
 
 &nbsp;
-
----
-## Background
  
 The Grassberger–Procaccia correlation integral is:
  
@@ -1945,18 +1945,6 @@ compute_ellner_from_c2(<base>.c2, r_min, r_max, dim=3)
 ---
 
 # Largest Lyapunov Exponent Pipeline — Implementation Notes
- 
-## Table of Contents
- 
-1. [lyap_k.c — building S(t, m, ε)](#1-lyap_kc--building-st-m-ε)
-2. [Lambda_max.bat — orchestration](#2-lambda_maxbat--orchestration)
-3. [tisean_io.run_lyap_k — the bootstrap-path lyap_k call](#3-tisean_iorun_lyap_k--the-bootstrap-path-lyap_k-call)
-4. [invariants_lyapunov.py — parsing, linear window, OLS](#4-invariants_lyapunovpy--parsing-linear-window-ols)
-5. [How this gets called per series](#5-how-this-gets-called-per-series)
-6. [TL;DR data-flow diagram](#tldr-data-flow-diagram)
----
- 
-## Background
  
 For a deterministic chaotic flow, two nearby trajectories diverge exponentially with rate equal to the largest Lyapunov exponent $\lambda_{\max}$:
  

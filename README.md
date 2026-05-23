@@ -1916,6 +1916,623 @@ compute_ellner_from_c2(<base>.c2, r_min, r_max, dim=3)
 
 ---
 
+# Largest Lyapunov Exponent Pipeline — Implementation Notes
+ 
+## Table of Contents
+ 
+1. [lyap_k.c — building S(t, m, ε)](#1-lyap_kc--building-st-m-ε)
+2. [Lambda_max.bat — orchestration](#2-lambda_maxbat--orchestration)
+3. [tisean_io.run_lyap_k — the bootstrap-path lyap_k call](#3-tisean_iorun_lyap_k--the-bootstrap-path-lyap_k-call)
+4. [invariants_lyapunov.py — parsing, linear window, OLS](#4-invariants_lyapunovpy--parsing-linear-window-ols)
+5. [How this gets called per series](#5-how-this-gets-called-per-series)
+6. [TL;DR data-flow diagram](#tldr-data-flow-diagram)
+---
+ 
+## Background
+ 
+For a deterministic chaotic flow, two nearby trajectories diverge exponentially with rate equal to the largest Lyapunov exponent $\lambda_{\max}$:
+ 
+$$\delta(t) \approx \delta_0 \cdot \exp(\lambda_{\max} \cdot t)$$
+ 
+Kantz (1994) turns this into a robust, neighbour-based estimator. For each reference point $x_n$ in the $m$-dimensional delay embedding, take its $\varepsilon$-neighbourhood:
+ 
+$$U_n(\varepsilon) = \left\{ x_k : \|x_n - x_k\| \leq \varepsilon \;\wedge\; |n - k| > W \right\}$$
+ 
+(the $|n - k| > W$ term is the Theiler window) and follow each pair forward $t$ steps. The Kantz divergence curve is:
+ 
+$$S(t, m, \varepsilon) = \frac{1}{\#\text{ref points}} \sum_n \log_e \frac{1}{|U_n(\varepsilon)|} \sum_{x_k \in U_n(\varepsilon)} \|x_{n+t} - x_{k+t}\|$$
+ 
+> **Note:** TISEAN uses log-of-RMS rather than log-of-mean; see [Step 1c](#step-1c--forward-iteration--st-accumulation). The difference is a constant offset, irrelevant for the slope.
+ 
+Under the exponential-divergence model $S(t)$ is asymptotically linear in $t$:
+ 
+$$S(t) \approx \text{const} + \lambda_{\max} \cdot t$$
+ 
+so:
+ 
+$$\text{LLE} \equiv \lambda_{\max} = \text{OLS slope of } S(t) \text{ on the linear region of the curve}$$
+ 
+The two practical choices the implementation has to make are:
+ 
+1. **Which $(m, \varepsilon)$-block of $S(t)$ to fit.** `lyap_k` emits one curve per $(m, \varepsilon)$ pair.
+2. **Which interval $[t_{\text{lo}}, t_{\text{hi}}]$ is "the linear region."** It has to be long enough to make the slope statistically meaningful and short enough to be in the linear regime (before the curve saturates at the attractor diameter).
+Everything below is the machinery for those two choices.
+ 
+---
+ 
+## 1. `lyap_k.c` — building S(t, m, ε)
+ 
+**Source:** `Tisean_3.0.0/source_c/lyap_k.c`
+ 
+### Inputs
+ 
+The `.bat` invokes `lyap_k.exe` at line 207 of `Lambda_max.bat`:
+ 
+```bat
+echo   [1/2] lyap_k: Kantz S^(t^) divergence curves ^(m=%M_MIN%..%M_MAX%, -n%STEPS% ref pts, -s%ITER% iters, -t!THEILER_W!^)...
+"%TISEAN%\lyap_k.exe" -d!TAU_DELAY! -m%M_MIN% -M%M_MAX% -t!THEILER_W! -n%STEPS% -s%ITER% -o "!OUT_DIR!\!BASE!_lyap.txt" "!DATA_FILE!"
+```
+ 
+Mapped to the C constants:
+ 
+| C name | flag | role | thesis value |
+|--------|------|------|-------------|
+| `delay` | `-d` | embedding delay τ | per-coin `TAU_LLE_<sym>` |
+| `mindim` | `-m` | smallest embedding m | 3 (full) / 3 (test) |
+| `maxdim` | `-M` | largest embedding m | 10 (full diag) / 3 (bootstrap) |
+| `window` | `-t` | Theiler window W | per-coin `W_D2_<sym>` |
+| `reference` | `-n` | # reference points used to average S(t) | 500 (full) / 200 (test) |
+| `maxiter` | `-s` | # forward iterations = length of S(t) | 100 (full) / 30 (test) |
+| `epscount` | `-#` | # ε values to sweep | 5 (default) |
+| `epsmin/max` | `-r/-R` | ε range | TISEAN defaults |
+ 
+`epsmin` / `epsmax` default to `range/1000` and `range/100`, and `epscount = 5` so `lyap_k` produces a small geometric ε sweep automatically:
+ 
+```c
+// lyap_k.c, lines 308–311
+if (epscount == 1)
+  eps_fak=1.0;
+else
+  eps_fak=pow(epsmax/epsmin,1.0/(double)(epscount-1));
+```
+ 
+This is the reason the Python side later sees several "ε-blocks at m=3" per series.
+ 
+### Step 1a — ε-dependent box partitioning
+ 
+After rescaling the series to $[0, 1]$, `put_in_boxes(ε)` hashes every embedding point into a 128×128 grid on its first two coordinates:
+ 
+```c
+// lyap_k.c, lines 123–141
+void put_in_boxes(double eps)
+{
+  unsigned long i;
+  long j,k;
+  static unsigned long blength;
+  blength=length-(maxdim-1)*delay-maxiter;
+  for (i=0;i<BOX;i++)
+    for (j=0;j<BOX;j++)
+      box[i][j]= -1;
+  for (i=0;i<blength;i++) {
+    j=(long)(series[i]/eps)&ibox;
+    k=(long)(series[i+delay]/eps)&ibox;
+    liste[i]=box[j][k];
+    box[j][k]=i;
+  }
+}
+```
+ 
+Same idea as `d2.c` — O(N · pairs_per_box) neighbour lookup. Repeated for every ε in the sweep.
+ 
+### Step 1b — incremental neighbour search by embedding dimension
+ 
+`lfind_neighbors(act, ε)` walks the 3×3 cluster of boxes around `series[act]` and, at every embedding dimension `k = 1 … maxdim−1`, keeps the running squared distance:
+ 
+```c
+// lyap_k.c, lines 151–179
+lwindow=(long)window;
+for (hi=0;hi<maxdim-1;hi++)
+  found[hi]=0;
+i=(long)(series[act]/eps)&ibox;
+j=(long)(series[act+delay]/eps)&ibox;
+for (i1=i-1;i1<=i+1;i1++) {
+  i2=i1&ibox;
+  for (j1=j-1;j1<=j+1;j1++) {
+    element=box[i2][j1&ibox];
+    while (element != -1) {
+      if ((element < (act-lwindow)) || (element > (act+lwindow))) {
+        dx=sqr(series[act]-series[element]);
+        if (dx <= eps2) {
+          for (k=1;k<maxdim;k++) {
+            k1=k*delay;
+            dx += sqr(series[act+k1]-series[element+k1]);
+            if (dx <= eps2) {
+              k1=k-1;
+              lfound[k1][found[k1]]=element;
+              found[k1]++;
+            }
+            else
+              break;
+          }
+        }
+      }
+      element=liste[element];
+    }
+  }
+}
+```
+ 
+Two key things:
+ 
+1. **Theiler window:** `(element < act - W) || (element > act + W)` — pairs within $W$ time steps of `act` are skipped, ruling out trivially close neighbours from the same trajectory segment. This is exactly the `-t` argument passed per coin.
+2. **Cumulative squared distance `dx`:** starts at coord 0 and grows monotonically as `k` increases. The neighbour is recorded in `lfound[k-1]` for every embedding dimension `k` at which the running distance is still ≤ ε². As soon as it exceeds ε², the inner loop breaks. This is the same "Chebyshev-monotone-growth" trick `d2.c` uses for the correlation integral, but here against Euclidean ε² instead of Chebyshev ε.
+### Step 1c — forward iteration & S(t) accumulation
+ 
+`iterate_points(act)` follows each `(act, element)` pair forward for `s = maxiter` steps:
+ 
+```c
+// lyap_k.c, lines 203–225
+for (j=mindim-2;j<maxdim-1;j++) {
+  for (k=0;k<found[j];k++) {
+    element=lfound[j][k];
+    for (i=0;i<=maxiter;i++)
+      dx[i]=sqr(series[act+i]-series[element+i]);
+    for (l=1;l<j+2;l++) {
+      l1=l*delay;
+      for (i=0;i<=maxiter;i++)
+        dx[i] += sqr(series[act+i+l1]-series[element+l1+i]);
+    }
+    for (i=0;i<=maxiter;i++)
+      if (dx[i] > 0.0){
+        lcount[j][i]++;
+        lfactor[j][i] += dx[i];
+      }
+  }
+}
+for (i=mindim-2;i<maxdim-1;i++)
+  for (j=0;j<=maxiter;j++)
+    if (lcount[i][j]) {
+      count[i][j]++;
+      lyap[i][j] += log(lfactor[i][j]/lcount[i][j])/2.0;
+    }
+```
+ 
+For one reference point `act` at embedding `j+2` and iteration `i`:
+ 
+- `lfactor[j][i]` = $\sum_{\text{neighbours }k} \|x_{\text{act}+i} - x_{\text{element}_k+i}\|^2$ (sum of squared embedding distances)
+- `lcount[j][i]` = number of neighbours that contributed
+Then:
+ 
+$$\frac{\log\!\left(\texttt{lfactor}[j][i]\;/\;\texttt{lcount}[j][i]\right)}{2} = \log\!\sqrt{\text{mean squared distance}} = \log(\text{RMS distance at iteration }i)$$
+ 
+This is added to `lyap[j][i]`, and `count[j][i]` is incremented once per reference point that had at least one valid neighbour. After all reference points are processed:
+ 
+```c
+// lyap_k.c, lines 330–336
+for (i=mindim-2;i<maxdim-1;i++) {
+  fprintf(fout,"#epsilon= %e  dim= %d\n",epsilon*max,i+2);
+  for (j=0;j<=maxiter;j++)
+    if (count[i][j])
+      fprintf(fout,"%d %e %ld\n",j,lyap[i][j]/count[i][j],count[i][j]);
+  fprintf(fout,"\n");
+}
+```
+ 
+So `lyap[i][j] / count[i][j]` is the cross-reference-point average of log(RMS distance):
+ 
+$$S(t, m, \varepsilon) = \frac{1}{N_{\text{ref}}(m, \varepsilon, t)} \sum_{\text{reference points }n} \log\!\left(\text{RMS}_{k \in U_n(\varepsilon)} \|x_{n+t} - x_{k+t}\|\right)$$
+ 
+This is the Kantz curve — up to the constant $\log(\sqrt{\cdot})$ vs $\log(\text{mean}(\cdot))$ choice TISEAN makes, which doesn't affect the slope λ.
+ 
+### Output format
+ 
+For each ε and each m from `mindim` to `maxdim`, a block is written:
+ 
+```
+#epsilon= 2.345e-04  dim= 3
+0  -8.213e+00  413
+1  -8.184e+00  413
+2  -8.142e+00  413
+...
+100  -6.732e+00  389
+ 
+#epsilon= 4.683e-04  dim= 3
+0  ...
+```
+ 
+Columns are: `t` (iteration), `S(t)`, `count[i][t]` (# reference points whose neighbour cloud still had `dx > 0` at iteration `t`). The third column is what the Python side later reads as `n_neighbors`.
+ 
+For an `m_min..m_max` sweep of 3..10 with 5 ε-values, that's 40 blocks per series — but only the `dim=3` blocks contribute to the hypothesis-test number.
+ 
+---
+ 
+## 2. `Lambda_max.bat` — orchestration
+ 
+**Source:** `Tisean_3.0.0/bin/Lambda_max.bat`
+ 
+### Two distinct `lyap_k` modes
+ 
+The `.bat` runs `lyap_k` once with the full m-sweep (m=3..10) for diagnostic plots and per-m printouts:
+ 
+```bat
+// Lambda_max.bat, lines 55–60
+set M_MIN=3
+set M_MAX=10
+set M_PRIMARY=3
+set STEPS=500
+set ITER=100
+set MIN_NEIGHBORS=10
+```
+ 
+That output is the diagnostic table:
+ 
+```
+Diagnostic lyap_k slopes (first epsilon block per m; ...):
+  m  lambda  pts
+  3  0.05143 101
+  4  0.00598 101
+  ...
+```
+ 
+But the hypothesis-test number is computed by `hypothesis.py`, which calls `tisean_io.run_lyap_k` ([Stage 3](#3-tisean_iorun_lyap_k--the-bootstrap-path-lyap_k-call)) with `-m3 -M3` — a single embedding, multiple ε. The two paths are intentionally separated:
+ 
+```bat
+// Lambda_max.bat, lines 157–160
+echo   [Hypothesis] LLE stationary-bootstrap TS test ^(tau=!COIN_TAU!, W=!COIN_W!^)
+"%PYTHON_EXE%" %PYTHON_ARGS% "%REPO_ROOT%\hypothesis.py" --input "!DATA_FILE!" --base "!BASE!" --delay !COIN_TAU! --theiler !COIN_W! --output_dir "!HYP_DIR!" --test_mode "%TEST_MODE%" --metrics_list "LLE" !DCH_HYP_EXTRA!
+```
+ 
+### Test-mode env-clearing policy
+ 
+Test-mode shrinks `-n`, `-s`, and the neighbour floor via three env vars; production explicitly clears them so the Python side falls back to `hypothesis_config` defaults:
+ 
+```bat
+// Lambda_max.bat, lines 81–88
+REM Clear any stale test-mode overrides so hypothesis.py uses production
+REM defaults from hypothesis_config (matches lyap_k.exe flags above).
+set "DCH_LYAP_STEPS="
+set "DCH_LYAP_ITERATIONS="
+set "DCH_LYAP_MIN_NEIGHBORS="
+echo [INFO] FULL MODE - using complete files
+```
+ 
+Without that block, a previous test run that set `DCH_LYAP_STEPS=200` in the parent shell would silently degrade the full pipeline.
+ 
+---
+ 
+## 3. `tisean_io.run_lyap_k` — the bootstrap-path `lyap_k` call
+ 
+**Source:** `tisean_io.py`. Called once per series during bootstrap.
+ 
+```python
+# tisean_io.py, lines 142–163
+try:
+    w_eff = max(0, int(theiler))
+except (TypeError, ValueError):
+    w_eff = 0
+cwd = os.path.dirname(os.path.abspath(output_file)) or "."
+out_base = os.path.basename(output_file)
+data_abs = os.path.abspath(data_file)
+cmd = [
+    resolve_tool("lyap_k"),
+    f"-d{delay}",
+    f"-m{M_LYAP}",
+    f"-M{M_LYAP}",
+    f"-t{w_eff}",
+    "-n",
+    str(lyap_k_steps()),
+    "-s",
+    str(lyap_k_iterations()),
+    "-o",
+    out_base,
+    data_abs,
+]
+subprocess.run(cmd, cwd=cwd, check=True, capture_output=True, text=True)
+```
+ 
+Three details that matter:
+ 
+1. **`-m M_LYAP -M M_LYAP` — only the active embedding (m = 3).** `lyap_k` still emits 5 blocks (one per ε in `epscount = 5`), but all at the same `dim`. This keeps per-bootstrap cost low while still giving the Python side multiple ε-blocks to pick from.
+2. **`-t w_eff` with `w_eff = max(0, int(theiler))`** — the per-coin Theiler window from the `_per_coin_settings.bat` lookup, sanitised so a missing override falls back to 0.
+3. **`cwd = dir(output_file)` + basename argument** — same FORTRAN path-truncation workaround as for `d2.exe` / `c2t.exe`.
+The output file is `<prefix>_lyap.txt`, kept in a per-series temp directory inside `invariants_compute.compute_invariants` for the duration of one estimation, then deleted (unless the caller passed `lyap_keep_path` for the LLE diagnostic plot).
+ 
+---
+ 
+## 4. `invariants_lyapunov.py` — parsing, linear window, OLS
+ 
+**Source:** `invariants_lyapunov.py`. This is where the slope decision actually happens.
+ 
+### (a) `_parse_lyap_blocks` — block reader
+ 
+```python
+# invariants_lyapunov.py, lines 115–181
+def _parse_lyap_blocks(lyap_file, dim=M_LYAP):
+    ...
+    def _flush():
+        if current_dim == dim and current_rows:
+            arr = np.array(current_rows, dtype=float)
+            n_nbrs = int(np.median(arr[:, 2])) if arr.shape[1] >= 3 else 0
+            blocks.append(
+                {
+                    "eps": current_eps,
+                    "n_neighbors": n_nbrs,
+                    "data": arr[:, :2],
+                }
+            )
+```
+ 
+- Splits on `#epsilon=` headers and parses out both `epsilon` and `dim`.
+- Keeps only blocks at the requested `dim` (= `M_LYAP = 3` in the active path).
+- Per block stores `eps`, the `(t, S(t))` data, and the median of column 3 across rows as `n_neighbors`. That median is the neighbour-cloud size statistic later used to filter "starved" blocks.
+### (b) `_best_linear_slope_window` — linear-region picker + OLS
+ 
+```python
+# invariants_lyapunov.py, lines 50–106
+# Window search: prefer the longest strictly-linear segment (|rho| >= 0.99)
+# and fall back to the highest-|rho| segment when none is "strictly" linear.
+for width in range(min_points, n + 1):
+    for start in range(0, n - width + 1):
+        xs = x[start:start + width]
+        ys = y[start:start + width]
+        rho = _pearson_abs(xs, ys)
+        if not np.isfinite(rho):
+            continue
+        try:
+            coeffs = np.polyfit(xs, ys, 1)
+            slope = float(coeffs[0])
+            intercept = float(coeffs[1])
+        except Exception:
+            continue
+        if not np.isfinite(slope):
+            continue
+        if rho >= R2_THRESHOLD and width > best_len_thresh:
+            best_len_thresh = width
+            win_thresh = (start, width, slope, intercept)
+        if rho > best_rho_fallback:
+            best_rho_fallback = rho
+            win_fb = (start, width, slope, intercept)
+win = win_thresh if win_thresh is not None else win_fb
+...
+if width > 2:
+    xs = x[start:start + width]
+    ys = y[start:start + width]
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            coeffs, cov = np.polyfit(xs, ys, 1, cov=True)
+        slope_cov = float(coeffs[0])
+        intercept_cov = float(coeffs[1])
+        if np.isfinite(slope_cov):
+            slope = slope_cov
+            intercept = intercept_cov
+        if np.ndim(cov) == 2 and cov.shape == (2, 2):
+            var_slope = float(cov[0, 0])
+            if np.isfinite(var_slope) and var_slope >= 0.0:
+                std_err = float(np.sqrt(var_slope))
+```
+ 
+The window-selection rule:
+ 
+1. **Primary criterion:** scan every contiguous `(start, width)` window with `width ≥ MIN_LYAP_LINEAR_POINTS = 3`. Compute the absolute Pearson correlation $|\rho|$. Keep the **longest window** with $|\rho| \geq 0.99$ — i.e. the longest strictly-linear segment.
+2. **Fallback:** if no segment reaches $|\rho| \geq 0.99$ (typical for noisy financial $S(t)$), take the window with the highest $|\rho|$, regardless of width.
+3. Once a window is chosen, rerun `np.polyfit(..., cov=True)` to get the OLS slope and its standard error `std_err = sqrt(cov[0, 0])`. The `width > 2` guard avoids the degenerate case `polyfit` produces with exactly two points (no residual degrees of freedom → singular covariance scaling).
+`MIN_LYAP_LINEAR_POINTS = 3` (down from 5) because empirically the linear region of $S(t)$ on hourly log-returns is only a handful of iterations long — strictly linear stretches of 5+ points are rare.
+ 
+The returned tuple is `(slope, t_lo, t_hi, intercept, std_err)`.
+ 
+### (c) `_fit_lle_block` — block scoring
+ 
+```python
+# invariants_lyapunov.py, lines 184–224
+def _fit_lle_block(blk):
+    """Return scored candidate tuple for one parsed lyap_k block, or None.
+    Tuple layout: ``(quality, slope, std_err, eps, t_lo, t_hi, intercept,
+    n_neighbors)``. Ordering by descending quality picks the longest linear
+    window with the smallest OLS slope error.
+    A perfectly linear window (``std_err == 0``) is the best possible fit:
+    it is mapped to ``quality = +inf`` so it wins the selection rather than
+    being silently dropped. Non-finite slope or non-positive window width
+    still skip the block.
+    """
+    data = blk["data"]
+    if data.shape[0] < 3:
+        return None
+    slope, t_lo, t_hi, intercept, std_err = _best_linear_slope_window(
+        data[:, 0], data[:, 1]
+    )
+    if not np.isfinite(slope):
+        return None
+    if not (np.isfinite(t_lo) and np.isfinite(t_hi) and t_hi > t_lo):
+        return None
+    if not np.isfinite(std_err) or std_err < 0.0:
+        return None
+    if std_err == 0.0:
+        quality = float("inf")
+    else:
+        quality = (t_hi - t_lo) / std_err
+```
+ 
+The block-level quality score is:
+ 
+$$\text{quality} = \frac{t_{\text{hi}} - t_{\text{lo}}}{\text{std\_err}}$$
+ 
+i.e. "longer linear range / smaller fit error wins". This is the automated form of the textbook's "longest stable linear region" rule. Exact-linear windows (`std_err = 0`) map to $+\infty$ quality so they win cleanly instead of being dropped as degenerate.
+ 
+### (d) `find_best_lle_block` — neighbour-floor filter + relaxation
+ 
+```python
+# invariants_lyapunov.py, lines 248–275
+candidates = []
+for blk in blocks:
+    if blk["n_neighbors"] < min_neighbors:
+        logger.debug(
+            "lyap block eps=%.6g skipped: n_neighbors=%d < %d",
+            blk["eps"], blk["n_neighbors"], min_neighbors,
+        )
+        continue
+    fitted = _fit_lle_block(blk)
+    if fitted is not None:
+        candidates.append(fitted)
+if not candidates:
+    logger.warning(
+        "find_best_lle_block: no block passed n_neighbors>=%d in %s; "
+        "relaxing neighbour filter.",
+        min_neighbors, lyap_file,
+    )
+    for blk in blocks:
+        fitted = _fit_lle_block(blk)
+        if fitted is not None:
+            candidates.append(fitted)
+if not candidates:
+    return None, []
+candidates.sort(reverse=True)  # descending quality
+return candidates[0], candidates
+```
+ 
+Two-stage filter:
+ 
+1. **First pass:** discard blocks whose median `n_neighbors` is below `lyap_min_neighbors()` (= 10 in production, 3 in test). Kantz–Schreiber recommend ≥ 10 because $S(t)$ with very few neighbours per reference point is dominated by single-pair fluctuations.
+2. **Relaxation:** if the strict filter throws everything out (small surrogates, noisy bootstrap draws), fall back to all blocks with a warning. This keeps the bootstrap loop alive — the alternative would be to return `NaN` for that surrogate, which is fine statistically but breaks plot continuity.
+Then sort by `quality` and return the best one plus the full candidate list.
+ 
+### (e) `extract_lle_ols` — the LLE scalar
+ 
+```python
+# invariants_lyapunov.py, lines 302–332
+if dim is None:
+    dim = M_LYAP
+best, candidates = find_best_lle_block(
+    lyap_file, min_neighbors=min_neighbors, dim=dim,
+)
+if best is None:
+    return np.nan, np.nan, 0
+best_quality, best_slope, best_std_err, best_eps, best_t_lo, best_t_hi, _b, _nn = best
+all_slopes = np.array([c[1] for c in candidates], dtype=float)
+median_slope = float(np.median(all_slopes))
+spread = float(np.std(all_slopes, ddof=1)) if all_slopes.size > 1 else 0.0
+logger.info(
+    "lle ols: best eps=%.6g slope=%.6g +/- %.3g "
+    "(window t=[%.3g,%.3g], quality=%.3g); "
+    "median across %d ε-blocks at m=%d = %.6g, spread = %.3g",
+    best_eps, best_slope, best_std_err,
+    best_t_lo, best_t_hi, best_quality,
+    len(candidates), int(dim), median_slope, spread,
+)
+return float(best_slope), float(best_std_err), int(len(candidates))
+```
+ 
+Returns three things:
+ 
+| Field | Meaning |
+|-------|---------|
+| `slope_lambda` | LLE point estimate. OLS slope of $S(t)$ on the selected linear window, at the best ε-block. |
+| `std_err_lambda` | OLS standard error of that slope (Hegger–Kantz–Schreiber 1999 primary uncertainty). |
+| `n_usable_blocks` | Number of ε-blocks that produced a finite `(slope, std_err)` pair — diagnostic only. |
+ 
+The `INFO` log is the robustness check: median and spread of slopes across all usable ε-blocks (at the same `m`), to make obvious when the chosen block is an outlier relative to its peers. The wording makes explicit that "5 ε-blocks at m=3" is a length-scale sweep, not an embedding sweep.
+ 
+---
+ 
+## 5. How this gets called per series
+ 
+`invariants_compute.compute_invariants` is the one place that drives the whole stack from a NumPy array to one scalar:
+ 
+```python
+# invariants_compute.py, lines 127–156
+if need_lle:
+    # LLE is one scalar slope estimate. It is recomputed for
+    # original/reference/bootstrap series when LLE is selected.
+    #
+    # Book mapping:
+    #   run_lyap_k() estimates S(t), the averaged logarithmic divergence
+    #   from (8.95), under the exponential-separation model (8.94).
+    #   extract_lle_ols() then finds the linear part of S(t), fits OLS
+    #   slope ± std_err on the best epsilon block, and returns lambda
+    #   with its OLS uncertainty.
+    lyap_file = prefix + "_lyap.txt"
+    run_lyap_k(data_file, delay, theiler, lyap_file)
+    if lyap_keep_path:
+        # Preserve the S(t) curves for the LLE diagnostic plot before
+        # the tmp directory is wiped in the ``finally`` clause below.
+        try:
+            keep_dir = os.path.dirname(os.path.abspath(lyap_keep_path))
+            if keep_dir:
+                os.makedirs(keep_dir, exist_ok=True)
+            shutil.copyfile(lyap_file, lyap_keep_path)
+        except OSError:
+            logger.exception(
+                "Failed to copy lyap_k output to keep path %s",
+                lyap_keep_path,
+            )
+    mu, sg, nn = extract_lle_ols(lyap_file)
+    out["LLE"], out_std["LLE"] = mu, sg
+    # NB: out_n["LLE"] = number of usable epsilon blocks (diagnostic),
+    # not a plateau point count. See module docstring.
+    out_n["LLE"] = nn
+```
+ 
+Three design choices to notice:
+ 
+1. **One `lyap_k.exe` call per series, one scalar out.** Multi-m sweeps live exclusively in the `.bat` diagnostic path.
+2. **`lyap_keep_path` preserves the orig-series `_lyap.txt`** before the per-bootstrap tmp directory is wiped, so the LLE diagnostic plot (`plot_lyap_k_output.py`) has something to draw afterwards. Bootstrap surrogates' `lyap_k` outputs are deliberately not kept — there would be $B = 1000$ of them.
+3. **`out_n["LLE"]` is the # of usable ε-blocks**, not a plateau-points count like for TAKENS/ELLNER. The module docstring documents this difference because the same dictionary key has different semantics across metrics.
+The resulting LLE scalars feed `hypothesis_ts.invariant_bootstrap_ts_test`, which forms:
+ 
+$$TS_{\text{LLE}} = \frac{\lambda_{\text{orig}} - \overline{\lambda_{\text{boot}}}}{\text{SD}_b\!\left\{\lambda_{\text{boot},b}\right\}}$$
+ 
+and the thesis decision rule is $|TS_{\text{LLE}}| \geq 3$. The within-series `std_err` returned by `extract_lle_ols` is reported in `out_std["LLE"]` for context, but the test statistic uses the bootstrap-distribution SD, not the single-series OLS `std_err`.
+ 
+---
+ 
+## TL;DR data-flow diagram
+ 
+```
+          series (.dat)
+               │
+               ▼  lyap_k.c (Kantz algorithm)
+          lyap_k.exe  (-d τ  -m 3 -M 3  -t W  -n 500  -s 100)
+               │  put_in_boxes(ε)        ── ε-grid box hashing
+               │  lfind_neighbors(act,ε) ── Theiler-filtered ε-neighbours
+               │  iterate_points(act)    ── forward, log(RMS dist) accum
+               ▼
+   <base>_lyap.txt  ─  per (ε, m=3) block: rows  ( t ,  S(t) ,  n_neighbors )
+               │
+               ▼  invariants_lyapunov._parse_lyap_blocks
+        list of  { eps, n_neighbors (median), data: (t, S(t)) }
+               │
+               ▼  find_best_lle_block
+        ┌──────┴───────────────────────────────────────────────┐
+        │ 1. drop blocks with n_neighbors < lyap_min_neighbors  │
+        │ 2. fallback: keep all blocks if step 1 cleared list   │
+        │ 3. _fit_lle_block per block:                          │
+        │      a. _best_linear_slope_window:                    │
+        │         longest |ρ|≥0.99 window in S(t) vs t          │
+        │         (else max-|ρ| fallback)                       │
+        │      b. OLS via polyfit(..., cov=True)                │
+        │         → slope, std_err                              │
+        │      c. quality = (t_hi − t_lo) / std_err             │
+        │         (std_err = 0 → quality = +∞)                  │
+        │ 4. sort blocks by quality desc                        │
+        └──────────────────────────────────────────────────────┘
+               │
+               ▼  extract_lle_ols
+    LLE      = slope of best block
+    std_err  = OLS standard error of that slope
+    n_blocks = # ε-blocks that produced a usable fit
+               │
+               ▼
+     hypothesis_ts  →  |TS_LLE| ≥ 3 decision
+```
+ 
+### Three single-takeaway points
+ 
+1. **`lyap_k.c` builds $S(t)$ exactly once per $(m, \varepsilon)$; the slope decision is purely Python-side.** TISEAN never tries to extract λ itself. That is on purpose — the linear-region choice is the only part of the algorithm with real methodological discretion, and the project keeps it under version control instead of inside the C binary.
+2. **Two parallel quality criteria:** ε is chosen on $(t_{\text{hi}} - t_{\text{lo}}) / \text{std\_err}$ (the block selector), and the $t$-window is chosen on $|\rho| \geq 0.99$ with a max-$|\rho|$ fallback (the per-block window selector). Both are configurable in code (`R2_THRESHOLD = 0.99`, `MIN_LYAP_LINEAR_POINTS = 3`) but neither is exposed as user config — they're "calibrated for hourly-return-scale chaos" defaults.
+3. **`std_err` reported by `extract_lle_ols` is a within-series fit error, not the statistical uncertainty used by the hypothesis test.** The decision-grade SD is computed across the $B = 1000$ stationary-bootstrap $\lambda$ estimates by `hypothesis_ts.invariant_bootstrap_ts_test`. The two SDs answer different questions: the OLS `std_err` says "how good is the linear fit to this one $S(t)$ curve?"; the bootstrap SD says "how stable is λ under temporal resampling of the original series?". Both are reported, but only the second one enters the $|TS| \geq 3$ rule.
+
+---
+
 &nbsp;
 
 ## TISEAN Binaries Used (Active Pipeline)

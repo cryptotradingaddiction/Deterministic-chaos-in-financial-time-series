@@ -1411,6 +1411,511 @@ Same scaling idea (count occupied ε-boxes in embedding space); here it is **imp
 
 ---
 
+# Correlation Dimension Pipeline — Implementation Notes
+ 
+## Table of Contents
+ 
+1. [d2.c — building C⁽ᵐ⁾(r) on a geometric ε-grid](#1-d2c--building-cm-r-on-a-geometric-ε-grid)
+2. [correlation_dimension.bat — orchestration](#2-correlation_dimensionbat--orchestration)
+3. [c2t.f — turning C⁽ᵐ⁾(r) into d₂⁽ᵀ⁾(r')](#3-c2tf--turning-cm-r-into-d2tr)
+4. [invariants_correlation.py — plateau picker + Ellner number](#4-invariants_correlationpy--plateau-picker--ellner-number)
+5. [How this gets called per series](#5-how-this-gets-called-per-series)
+6. [TL;DR data-flow diagram](#tldr-data-flow-diagram)
+---
+ 
+## Background
+ 
+The Grassberger–Procaccia correlation integral is:
+ 
+$$C^{(m)}(r) = \frac{2}{N(N-1)} \sum_{i < j} \Theta\!\left(r - \|x_i - x_j\|_\infty\right)$$
+ 
+It is expected to scale as:
+ 
+$$C^{(m)}(r) \sim r^{D_2} \quad \text{as } r \to 0$$
+ 
+inside the attractor's linear scaling region. From $C^{(m)}(r)$ we build two derived estimators (eqs. 8.75–8.78 in Hegger–Kantz–Schreiber):
+ 
+**Takens (maximum likelihood):**
+ 
+$$\hat{d}_2^{(T)}(r') = \frac{C^{(m)}(r')}{\displaystyle\int_0^{r'} C^{(m)}(r)\,/\,r\; dr}$$
+ 
+**Ellner (finite-interval correction):**
+ 
+$$\hat{d}_2^{(E)} = \frac{C^{(m)}(r_{\max}) - C^{(m)}(r_{\min})}{\displaystyle\int_{r_{\min}}^{r_{\max}} C^{(m)}(r)\,/\,r\; dr}$$
+ 
+The plateau interval $[r_{\min},\, r_{\max}]$ is shared between the two estimators by construction.
+ 
+---
+ 
+## 1. `d2.c` — building C⁽ᵐ⁾(r) on a geometric ε-grid
+ 
+**Source:** `Tisean_3.0.0/source_c/d2.c`
+ 
+### Inputs
+ 
+The `.bat` invokes `d2.exe` at line 196 of `correlation_dimension.bat`:
+ 
+```bat
+"%TISEAN%\d2.exe" -d!TAU_DELAY! -M%EMBED% -t!THEILER_W! -#100 -N0 -o "!OUT_DIR!\!BASE!" "!DATA_FILE!"
+```
+ 
+Mapped to the C constants: `DELAY = τ`, `DIM = 1`, `EMBED = 10`, `MINDIST = W` (Theiler window), `HOWOFTEN = 100` (number of ε samples), `MAXFOUND = 0 → ULONG_MAX` (no early-termination cap on pair counts).
+ 
+### Step 1a — exponential ε-grid
+ 
+```c
+// d2.c, lines 399–409
+epsinv=1.0/EPSMAX;
+epsfactor=pow(EPSMAX/EPSMIN,1.0/(double)howoften1);
+lneps=log(EPSMAX);
+lnfac=log(epsfactor);
+epsm[0]=EPSMAX;
+norm[0]=0.0;
+for (i=1;i<HOWOFTEN;i++) {
+  norm[i]=0.0;
+  epsm[i]=epsm[i-1]/epsfactor;
+}
+```
+ 
+So `epsm[i] = EPSMAX * epsfactor^(-i)` with `epsfactor = (EPSMAX/EPSMIN)^(1/(HOWOFTEN−1))`. That gives 100 ε's spaced logarithmically from `EPSMAX = data range` to `EPSMIN = range/1000`. This geometric layout is the reason every downstream integral (in `c2t.f` and in `invariants_correlation.py`) ends up working in `ln r` instead of in linear `r`.
+ 
+### Step 1b — pair counting (max-norm, box-assisted)
+ 
+For each scrambled reference point `n`, `make_c2_dim()` does the Chebyshev-distance bin update:
+ 
+```c
+// d2.c, lines 230–243
+dx=fabs(hs[count]-series[j][element+hi]);
+if (dx <= EPSMAX) {
+  if (dx > max) {
+    max=dx;
+    if (max < EPSMIN) {
+      maxi=howoften1;
+    }
+    else {
+      maxi=(lneps-log(max))/lnfac;
+    }
+  }
+  if (count > 0)
+    for (k=imin;k<=maxi;k++)
+      found[count][k] += 1.0;
+```
+ 
+Three things worth highlighting:
+ 
+1. **Max-norm embedding distance.** The inner loop tracks `max = max over i of |x[n + i·τ] − x[n' + i·τ]|`. Because `max` can only grow as `i` increases, the same pair contributes to every embedding dimension count ≥ `count_first_exceeding_ε` simultaneously. That is why `found[count][k]` is incremented for all embeddings up to `maxi` in a single pass.
+2. **Box-assisted neighbour search** (`box[x][y]`, `boxc1[x]`, `list[]`, `listc1[]`): pairs are looked up via a 256×256 spatial hash on the first two coordinates, then refined. Cost scales roughly as O(N · pairs_per_box · m) instead of O(N² · m).
+3. **Theiler window via `MINDIST`.** Pairs with `|i − n| ≤ MINDIST` are skipped:
+```c
+// d2.c, line 222
+if (labs((long)(element-n1)) > MINDIST) {
+```
+ 
+The pair-count normaliser `lnorm` (lines 481–490) is decremented by the number of indices that fall inside the Theiler window around `scr[n]`, so the denominator of $C^{(m)}$ remains consistent.
+ 
+### Step 1c — output files (per m = 1 … 10)
+ 
+Every ~120 s or at the end of the run, `d2.c` flushes three files:
+ 
+```c
+// d2.c, lines 509–521
+fout=fopen(outc1,"w");
+...
+for (i=0;i<EMBED*DIM;i++) {
+  fprintf(fout,"#dim= %ld\n",i+1);
+  eps=EPSMAX1*epsfactor;
+  for (j=0;j<HOWOFTEN;j++) {
+    eps /= epsfactor;
+    if (norm[j] > 0.0)
+      fprintf(fout,"%e %e\n",eps,found[i][j]/norm[j]);
+  }
+  fprintf(fout,"\n\n");
+}
+```
+ 
+| File | Contents |
+|------|----------|
+| `<base>.c2` | $(r,\; C^{(m)}(r))$ — the only file the Ellner path later reads |
+| `<base>.h2` | $(r,\; {-\ln C(r)})$ for $m=1$, then $(r,\; \ln(C^{(m-1)}/C^{(m)}))$ for $m>1$ (entropy form, unused) |
+| `<base>.d2` | Local discrete slope $\widetilde{D}_2(r_j)$ (see below) |
+ 
+The local slope in `.d2` is defined as:
+ 
+$$\widetilde{D}_2(r_j) = \frac{\ln C^{(m)}(r_{j-1}) - \ln C^{(m)}(r_j)}{\ln(r_{j-1}\,/\,r_j)}$$
+ 
+with a time-varying `norm[]` correction:
+ 
+```c
+// d2.c, lines 553–558
+for (j=1;j<HOWOFTEN;j++) {
+  eps /= epsfactor;
+  if ((found[i][j] > 0.0) && (found[i][j-1] > 0.0))
+    fprintf(fout,"%e %e\n",eps,log(found[i][j-1]/found[i][j]
+                                   /norm[j-1]*norm[j])/lnfac);
+}
+```
+ 
+The thesis uses `.d2` only for diagnostic plotting; the active dimension number comes from ELLNER, not from these finite-difference slopes.
+ 
+Blocks for distinct `m` are separated by `#dim=` headers and two blank lines — exactly the format `tisean_io.extract_tagged_block` later parses.
+ 
+---
+ 
+## 2. `correlation_dimension.bat` — orchestration
+ 
+**Source:** `Tisean_3.0.0/bin/correlation_dimension.bat`
+ 
+The `.bat` is a per-coin diagnostic harness. For each coin it does three things.
+ 
+### (a) Resolve τ and W from `_per_coin_settings.bat`
+ 
+```bat
+// correlation_dimension.bat, lines 133–138
+call set "COIN_TAU=%%TAU_D2_!BASE!%%"
+call set "COIN_W=%%W_D2_!BASE!%%"
+if "!COIN_TAU!"=="" set "COIN_TAU=3"
+if "!COIN_W!"==""   set "COIN_W=0"
+call :RUN_D2 "!BASE!" "!DATA_FILE!" "run2_tau!COIN_TAU!_W!COIN_W!" !COIN_TAU! !COIN_W!
+```
+ 
+`TAU_D2_<sym>` is the first mutual-information minimum produced by `mutual.bat`; `W_D2_<sym>` is the Theiler-window estimate from `theilers_w.bat`. Same two numbers are then fed to the Python hypothesis driver below so `.bat` diagnostics and the bootstrap test cannot drift.
+ 
+### (b) Run `d2` → `c2t` → plateau / Ellner diagnostics
+ 
+```bat
+// correlation_dimension.bat, lines 195–209
+echo   [1/3] d2: default-range correlation sums + diagnostic local slopes...
+"%TISEAN%\d2.exe" -d!TAU_DELAY! -M%EMBED% -t!THEILER_W! -#100 -N0 -o "!OUT_DIR!\!BASE!" "!DATA_FILE!"
+if errorlevel 1 exit /b 1
+"%PYTHON_EXE%" %PYTHON_ARGS% "%PRINT_RESULTS%" d2 "!OUT_DIR!\!BASE!.d2"
+echo   [2/3] c2t: Takens-Theiler estimator; Ellner uses the detected plateau...
+pushd "!OUT_DIR!"
+"%TISEAN%\c2t.exe" -V0 -o "!BASE!_takens.dat" "!BASE!.c2"
+set C2T_ERR=!errorlevel!
+popd
+if not "!C2T_ERR!"=="0" exit /b !C2T_ERR!
+"%PYTHON_EXE%" %PYTHON_ARGS% "%PRINT_RESULTS%" takens "!OUT_DIR!\!BASE!_takens.dat"
+```
+ 
+Two operational details:
+ 
+- The `pushd` / `popd` around `c2t.exe` is not cosmetic — the Windows TISEAN binaries use fixed-length FORTRAN path buffers and silently truncate long absolute paths. Running from the output directory with basename arguments keeps `c2t` happy. `tisean_io.run_c2t` does the same dance for the bootstrap path:
+```python
+# tisean_io.py, lines 111–119
+cwd = os.path.dirname(os.path.abspath(c2_file))
+cmd = [
+    resolve_tool("c2t"),
+    "-V0",
+    "-o",
+    os.path.basename(output_file),
+    os.path.basename(c2_file),
+]
+```
+ 
+- `print_results d2` / `takens` only prints diagnostic per-`m` tables; it does not feed the hypothesis test.
+### (c) Hand off to the hypothesis driver
+ 
+```bat
+// correlation_dimension.bat, lines 146–148
+"%PYTHON_EXE%" %PYTHON_ARGS% "%REPO_ROOT%\hypothesis.py" --input "!DATA_FILE!" --base "!BASE!" --delay !COIN_TAU! --theiler !COIN_W! --output_dir "!HYP_DIR!" --test_mode "%TEST_MODE%" --metrics_list "%DIMENSION_METRICS%" !DCH_HYP_EXTRA!
+```
+ 
+`%DIMENSION_METRICS%` defaults to `ELLNER`. From here the `.bat` is no longer involved; the bootstrap loop happens entirely in Python.
+ 
+---
+ 
+## 3. `c2t.f` — turning C⁽ᵐ⁾(r) into d₂⁽ᵀ⁾(r')
+ 
+**Source:** `Tisean_3.0.0/source_f/c2t.f`. Tiny FORTRAN program, under 80 lines. Implements eq. (8.76) in closed form per ε-segment.
+ 
+### Step 3a — read C⁽ᵐ⁾(r) into log space
+ 
+```fortran
+! c2t.f, lines 40–52
+ 1    read(iunit,'(a)',end=999) aline
+ 4    if(aline(1:1).ne."#") goto 1
+      if(aline(1:1).eq."#") 
+     .   read(aline(index(aline,"m=")+2:72),'(i20)',err=1) m
+      me=0
+ 2    read(iunit,'(a)') aline
+      if(aline(1:72).eq." ") goto 3
+      read(aline,*,err=999,end=999) ee, cc
+      if(cc.le.0.) goto 3
+      me=me+1
+      e(me)=log(ee)
+      c(me)=log(cc)
+      goto 2
+```
+ 
+After the read: `e(i) = ln r_i` and `c(i) = ln C(r_i)`.
+ 
+### Step 3b — closed-form integral, segment by segment
+ 
+After ascending sort by `e`, the integral is built segment-by-segment assuming $C(r)$ is locally a power law between consecutive grid points (i.e. log–log linear):
+ 
+```fortran
+! c2t.f, lines 57–66
+      cint=0
+      do 10 i=2,me
+         b=(e(i)*c(i-1)-e(i-1)*c(i))/(e(i)-e(i-1))
+         a=(c(i)-c(i-1))/(e(i)-e(i-1))
+         if(a.ne.0) then
+            cint=cint+(exp(b)/a)*(exp(a*e(i))-exp(a*e(i-1)))
+         else
+            cint=cint+exp(b)*(e(i)-e(i-1))
+         endif
+ 10      write(iunit2,*) exp(e(i)), exp(c(i))/cint
+```
+ 
+**Mathematical derivation.** On each segment $[\ln r_{i-1},\, \ln r_i]$ we fit a line:
+ 
+$$\ln C(r) = b + a \cdot \ln r \quad \Longleftrightarrow \quad C(r) = e^b \cdot r^a$$
+ 
+so the cumulative integral up to $r_i$ gets the per-segment contribution:
+ 
+$$\int_{r_{i-1}}^{r_i} \frac{C(r)}{r}\,dr = \int e^b \cdot r^{a-1}\,dr = \begin{cases} \dfrac{e^b}{a}\!\left(r_i^a - r_{i-1}^a\right) & \text{if } a \neq 0 \\[6pt] e^b\!\left(\ln r_i - \ln r_{i-1}\right) & \text{if } a = 0 \end{cases}$$
+ 
+which is exactly the `cint` update above (`exp(a·e(i)) = r_i^a`). The `a = 0` branch handles flat segments where the closed form would degenerate.
+ 
+Each line of the output file is therefore:
+ 
+$$r_i, \quad \frac{C(r_i)}{\displaystyle\sum_{k=2}^{i} \text{segment}_k} = \frac{C(r_i)}{\displaystyle\int_{r_1}^{r_i} C(r)/r\; dr} \approx \hat{d}_2^{(T)}(r_i)$$
+ 
+i.e. equation (8.76) evaluated at every grid point of the original `.c2` block. The first point ($i = 1$) is skipped because there is no prior segment to integrate from.
+ 
+> **Note:** The lower limit is $r_1$, not $0$ — this is the inherent weakness of the raw Takens estimator that Ellner later patches. If there is no scaling below the smallest sampled ε, `cint` starts from "whatever the data shows there" instead of from zero. That is why we treat the resulting $\hat{d}_2^{(T)}(r')$ curve as a scan, find a plateau on it, and then re-integrate on only the plateau interval in the Ellner step.
+ 
+---
+ 
+## 4. `invariants_correlation.py` — plateau picker + Ellner number
+ 
+**Source:** `invariants_correlation.py`. Three pieces fit together.
+ 
+### (a) Plateau picker — `select_plateau_values`
+ 
+Input: rows `(r, value)` from a single `#m=m` block of the Takens file (`m = M_D2 = 3` in the thesis).
+ 
+```python
+# invariants_correlation.py, lines 44–62
+arr = np.asarray(rows, dtype=float)
+if arr.size == 0 or arr.ndim != 2 or arr.shape[1] < 2:
+    return np.array([], dtype=float), np.nan, np.nan
+eps = arr[:, 0]
+values = arr[:, 1]
+mask = np.isfinite(eps) & np.isfinite(values) & (eps > 0.0) & (values > 0.0)
+eps = eps[mask]
+values = values[mask]
+if values.size == 0:
+    return np.array([], dtype=float), np.nan, np.nan
+order = np.argsort(np.log(eps))
+eps_sorted = eps[order]
+x = np.log(eps_sorted)
+y = values[order]
+```
+ 
+Sorting by $\ln\varepsilon$ keeps the geometric grid axis aligned with how the plateau is interpreted visually on a $\hat{d}_2^{(T)}(r')$ vs $\ln r'$ plot.
+ 
+The interior of the search excludes `edge_margin = 2` points on each side (the discretization-noise floor and the finite-sample saturation region):
+ 
+```python
+# invariants_correlation.py, lines 73–81
+eff_margin = max(0, int(edge_margin))
+if n - 2 * eff_margin < min_points:
+    eff_margin = max(0, (n - min_points) // 2)
+    logger.warning(
+        "select_plateau_values: relaxed edge_margin to %d "
+        "(n=%d, min_points=%d).", eff_margin, n, min_points,
+    )
+i_lo = eff_margin
+i_hi = n - eff_margin
+```
+ 
+Then for every window $(i, j)$ of length ≥ `MIN_PLATEAU_POINTS = 8`, score:
+ 
+```python
+# invariants_correlation.py, lines 83–110
+best_score = -np.inf
+best_ij = (i_lo, i_hi)
+interior = max(1, i_hi - i_lo)
+for i in range(i_lo, i_hi - min_points + 1):
+    for j in range(i + min_points, i_hi + 1):
+        xs = x[i:j]
+        ys = y[i:j]
+        mean_abs = abs(float(np.mean(ys))) + 1e-12
+        try:
+            slope, _ = np.polyfit(xs, ys, 1)
+        except Exception:
+            continue
+        rel_slope = abs(float(slope)) / mean_abs
+        rel_sd = float(np.std(ys, ddof=1)) / mean_abs if ys.size > 1 else np.inf
+        length_bonus = np.sqrt((j - i) / interior)
+        score = PLATEAU_LENGTH_WEIGHT * length_bonus - rel_slope - rel_sd
+        if score > best_score:
+            best_score = score
+            best_ij = (i, j)
+```
+ 
+The score in compact form:
+ 
+$$\text{score}(i,j) = \underbrace{0.5 \cdot \sqrt{\frac{j-i}{\text{interior}}}}_{\text{length bonus (sqrt-saturating)}} - \underbrace{\frac{|\text{slope}_{\ln r}(y[i:j])|}{|\overline{y[i:j]}|}}_{\text{flatness penalty}} - \underbrace{\frac{\text{sd}(y[i:j])}{|\overline{y[i:j]}|}}_{\text{spread penalty}}$$
+ 
+So the picker rewards windows that are flat (true scaling region has constant $\hat{d}_2^{(T)}$), low-dispersion, and reasonably long.
+ 
+**Output:** three things —
+- `y[i:j]` → the plateau values themselves (used to compute the TAKENS scalar as `mean(y[i:j])`),
+- `r_min = eps_sorted[i]`, `r_max = eps_sorted[j-1]` → the radii handed to Ellner.
+This is also where the warning fires when the optimum window touches the lower or upper interior edge, distinguishing "noise floor latched" (lower) from "saturation latched" (upper).
+ 
+### (b) `extract_takens_plateau` — TAKENS scalar + handoff
+ 
+```python
+# invariants_correlation.py, lines 209–216
+rows = extract_tagged_block(takens_file, dim=dim, tag="#m")
+if rows.size == 0:
+    return np.nan, np.nan, 0, np.nan, np.nan
+y, r_min, r_max = select_plateau_values(rows)
+if y.size == 0:
+    return np.nan, np.nan, 0, np.nan, np.nan
+mean_val, sd_val, n_val = _mean_sd_n(y)
+return mean_val, sd_val, n_val, r_min, r_max
+```
+ 
+`mean_val` is the TAKENS estimator (the point estimate that goes into the bootstrap). `sd_val` / `n_val` are the empirical within-plateau spread (informational; the hypothesis-test SD is computed across bootstrap iterations elsewhere). `r_min` / `r_max` are the radii the Ellner integral will use.
+ 
+### (c) `compute_ellner_from_c2` — the ELLNER number
+ 
+```python
+# invariants_correlation.py, lines 249–293
+rows = extract_tagged_block(c2_file, dim=dim, tag="#dim")
+if rows.size == 0:
+    return np.nan
+if not (np.isfinite(r_min) and np.isfinite(r_max)) or r_min <= 0.0 or r_max <= r_min:
+    return np.nan
+r = rows[:, 0]
+c = rows[:, 1]
+finite = np.isfinite(r) & np.isfinite(c) & (r > 0.0) & (c > 0.0)
+r = r[finite]
+c = c[finite]
+if r.size < 2:
+    return np.nan
+order = np.argsort(r)
+r = r[order]
+c = c[order]
+mask = (r >= r_min) & (r <= r_max)
+if int(mask.sum()) < 2:
+    return np.nan
+r_sel = r[mask]
+c_sel = c[mask]
+c_max = float(np.interp(r_max, r, c))
+c_min = float(np.interp(r_min, r, c))
+if not (np.isfinite(c_max) and np.isfinite(c_min)) or c_max <= c_min:
+    return np.nan
+log_r_sel = np.log(r_sel)
+_trapz = getattr(np, "trapezoid", np.trapz)
+integral = float(_trapz(c_sel, log_r_sel))
+if not np.isfinite(integral) or integral <= 0.0:
+    return np.nan
+return float((c_max - c_min) / integral)
+```
+ 
+Three places where the implementation deliberately diverges from a naive transcription of eq. (8.78):
+ 
+1. **`np.interp` against the FULL sorted grid, not the masked subset.** If you interpolated against `r_sel`, the endpoints would clamp to `r_sel[0]` / `r_sel[-1]` whenever `r_min` / `r_max` fell strictly between grid points, biasing both boundary values toward the included subset and shrinking the numerator artificially. Interpolating against the full `r` grid uses the two true nearest grid points on each side.
+2. **Integration in `ln r`, not in `r`.** With $u = \ln r$, $du = dr/r$, so:
+$$\int_{r_{\min}}^{r_{\max}} \frac{C(r)}{r}\,dr = \int_{\ln r_{\min}}^{\ln r_{\max}} C(r)\,d(\ln r)$$
+ 
+The code therefore uses `np.trapezoid(c_sel, log_r_sel)`. The `d2.exe` ε-grid is exponentially spaced (Stage 1, `epsfactor`), so spacing in `ln r` is uniform and the trapezoidal rule converges nicely; spacing in linear `r` is wildly non-uniform and would systematically over-weight large-`r` segments.
+ 
+3. **Sequential NaN gates.** Every degenerate case (empty `.c2`, bad bounds, fewer than 2 points in the plateau, non-monotone or non-positive endpoints, zero or negative integral) returns `np.nan` cleanly. That matters during the bootstrap because a single pathological surrogate must not crash the B-iteration loop — it shows up as an extra `NaN` in the bootstrap distribution, which `hypothesis_ts.invariant_bootstrap_ts_test` filters out before computing the test statistic.
+---
+ 
+## 5. How this gets called per series
+ 
+`invariants_compute.compute_invariants` is the one place that runs the whole stack from a NumPy array to two scalars:
+ 
+```python
+# invariants_compute.py, lines 92–126
+try:
+    d2_file = h2_file = c2_file = None
+    if need_takens or need_ellner:
+        d2_file, h2_file, c2_file = run_d2(
+            data_file, delay, theiler, prefix,
+        )
+    if (need_takens or need_ellner) and c2_file:
+        takens_file = prefix + "_takens.dat"
+        run_c2t(c2_file, takens_file)
+        takens_mean, takens_sd, n_val, r_min, r_max = extract_takens_plateau(takens_file)
+        if need_takens:
+            out["TAKENS"] = takens_mean
+            out_std["TAKENS"] = takens_sd
+            out_n["TAKENS"] = int(n_val)
+        if np.isfinite(r_min) and np.isfinite(r_max) and r_max > r_min:
+            ellner = compute_ellner_from_c2(c2_file, r_min, r_max)
+        else:
+            ellner = np.nan
+        if need_ellner:
+            out["ELLNER"] = ellner
+            out_std["ELLNER"] = takens_sd
+            out_n["ELLNER"] = int(n_val) if np.isfinite(ellner) else 0
+```
+ 
+Two design choices worth noticing:
+ 
+1. **One `d2.exe` + `c2t.exe` pair per series, two scalars out.** TAKENS and ELLNER share the same `.c2` / Takens file and the same plateau interval by construction. That is why `out_std["ELLNER"] == out_std["TAKENS"]` — they describe the same plateau.
+2. **External-tool guard.** `need_takens or need_ellner` is checked before calling `run_d2`. During an LLE-only or RQA-only run we never invoke `d2.exe`. This matters because the function is called $B + 3$ times per coin during a hypothesis run ($B = 1000$ by default, plus original + Gaussian + Student-t reference series); skipping unused executables saves minutes per coin.
+The resulting ELLNER scalars feed `hypothesis_ts.invariant_bootstrap_ts_test`, which forms:
+ 
+$$TS_{\text{ELLNER}} = \frac{\hat{d}_2^{(E)}{}_{\text{orig}} - \overline{\hat{d}_2^{(E)}{}_{\text{boot}}}}{\text{SD}_b\!\left\{\hat{d}_2^{(E)}{}_{\text{boot},b}\right\}}$$
+ 
+and the thesis decision rule is $|TS_{\text{ELLNER}}| \geq 3$.
+ 
+---
+ 
+## TL;DR data-flow diagram
+ 
+```
+          series (.dat)
+               │
+               ▼  d2.c
+          d2.exe  (-d τ  -M 1..10  -t W  -# 100  -N 0)
+               │
+               ▼
+         <base>.c2  ──► <base>.h2  (unused)
+         <base>.d2  ──► diagnostic local slopes only
+               │
+               │  c2t.f (closed-form ∫ C(r)/r dr over
+               ▼   log-log linear segments → eq. 8.76)
+          c2t.exe
+               │
+               ▼
+    <base>_takens.dat  =  (r, d₂⁽ᵀ⁾(r))   per #m=m block
+               │
+               ▼  invariants_correlation.select_plateau_values
+        plateau picker on the m = M_D2 = 3 block
+        → (y_plateau,  r_min,  r_max)
+               │
+    ┌──────────┴─────────────┐
+    │ TAKENS = mean(y_plateau)
+    │
+    ▼
+compute_ellner_from_c2(<base>.c2, r_min, r_max, dim=3)
+  1. read #dim=3 block from .c2  →  (r, C(r))
+  2. C_min, C_max via np.interp against full grid
+  3. denom = ∫_{r_min}^{r_max} C(r)/r dr   (trapezoid in ln r)
+  4. ELLNER = (C_max − C_min) / denom
+               │
+               ▼
+     hypothesis_ts → |TS_ELLNER| ≥ 3 decision
+```
+ 
+### Three single-takeaway points
+ 
+1. **`c2t.f` is the bridge between the C and Python halves.** It computes the integral that turns $C(r)$ into $\hat{d}_2^{(T)}(r')$ in closed form per segment — TISEAN doesn't store a quadrature scheme, it stores the analytic result on each $(i-1, i)$ pair under the local power-law assumption $C(r) = e^b \cdot r^a$.
+2. **The plateau interval is shared.** TAKENS, ELLNER, and even the "edge touched" warning are all anchored on the one $[r_{\min},\, r_{\max}]$ pair the picker returned for the $m = 3$ block. Changing `select_plateau_values` changes both scalars at once.
+3. **Geometric grid → log-r quadrature.** Every integral on the Python side integrates in $\ln r$, because the underlying `d2.exe` ε-grid is exponentially spaced. Using a linear-$r$ trapezoid would be a silent systematic bias toward the large-$r$ tail.
+
+---
+
 &nbsp;
 
 ## TISEAN Binaries Used (Active Pipeline)

@@ -1689,8 +1689,8 @@ $$\ln C(r) = b + a \cdot \ln r \quad \Longleftrightarrow \quad C(r) = e^b \cdot 
  
 so the cumulative integral up to $r_i$ gets the per-segment contribution:
  
-$$\int_{r_{i-1}}^{r_i} \frac{C(r)}{r}\,dr = \int e^b \cdot r^{a-1}\,dr = \begin{cases} \dfrac{e^b}{a}\!\left(r_i^a - r_{i-1}^a\right) & \text{if } a \neq 0 \\ e^b\!\left(\ln r_i - \ln r_{i-1}\right) & \text{if } a = 0
- 
+$$\int_{r_{i-1}}^{r_i} \frac{C(r)}{r}\,dr = \int e^b \cdot r^{a-1}\,dr = \begin{cases} \dfrac{e^b}{a}\!\left(r_i^a - r_{i-1}^a\right) & \text{if } a \neq 0 \\ e^b\!\left(\ln r_i - \ln r_{i-1}\right) & \text{if } a = 0 \end{cases}$$
+
 which is exactly the `cint` update above (`exp(a·e(i)) = r_i^a`). The `a = 0` branch handles flat segments where the closed form would degenerate.
  
 Each line of the output file is therefore:
@@ -1956,7 +1956,7 @@ $$U_n(\varepsilon) = \left\{ x_k : \|x_n - x_k\| \leq \varepsilon \;\wedge\; |n 
  
 (the $|n - k| > W$ term is the Theiler window) and follow each pair forward $t$ steps. The Kantz divergence curve is:
  
-$$S(t, m, \varepsilon) = {#\text{ref points}} \sum_n \log_e \frac{1}{|U_n(\varepsilon)|} \sum_{x_k \in U_n(\varepsilon)} \|x_{n+t} - x_{k+t}\|$$
+$$S(t, m, \varepsilon) = \frac{1}{\#\text{ref points}} \sum_n \log_e \frac{1}{|U_n(\varepsilon)|} \sum_{x_k \in U_n(\varepsilon)} \|x_{n+t} - x_{k+t}\|$$
  
 > **Note:** TISEAN uses log-of-RMS rather than log-of-mean; see [Step 1c](#step-1c--forward-iteration--st-accumulation). The difference is a constant offset, irrelevant for the slope.
  

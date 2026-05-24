@@ -1,0 +1,9 @@
+RQA RESULTS (LTCUSD)
+# PyRQA params: tau=3, radius=0.003824319373 (percentile(4%)), config_radius=0.005, m=3, W=3 (per-coin W_D2 from theilers_w.bat), percentile=4%, settings_file=_per_coin_settings.bat
+RR=0.041104
+DET=0.148188
+LAM=0.224207
+MAXLINE=19
+ENTR=0.364223
+TT=2.286785
+TREND=0.000004

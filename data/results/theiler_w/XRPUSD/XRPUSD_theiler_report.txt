@@ -1,0 +1,13 @@
+TAU_A=6
+N=8760
+M=3
+W_FORMULA=1
+W_STP=31
+W_FINAL=3
+DECOR_METHOD=acf_zero
+FLOORED_AT_TAU=true
+SYMBOL=XRPUSD
+TAU=3
+ACF_FILE=C:\DCh\data\results\theiler_w\XRPUSD\XRPUSD_acf.dat
+STP_FILE=C:\DCh\data\results\theiler_w\XRPUSD\XRPUSD_stp.dat
+DATA_FILE=C:\DCh\data\XRPUSD_BITSTAMP_1h_complete_logreturns_cut.dat

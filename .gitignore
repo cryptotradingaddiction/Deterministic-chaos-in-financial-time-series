@@ -13,8 +13,8 @@ build/
 # Local paths — copy from config.example.yaml
 config.yaml
 
-# Downloaded market data & pipeline outputs (large)
-data/
+# Downloaded market data & pipeline outputs (now tracked for reproducibility;
+# previously gitignored as `data/`).
 
 # Local-only (not published)
 github/

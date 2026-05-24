@@ -1,0 +1,9 @@
+RQA RESULTS (ETHUSD)
+# PyRQA params: tau=3, radius=0.003593780875 (percentile(4%)), config_radius=0.005, m=3, W=3 (per-coin W_D2 from theilers_w.bat), percentile=4%, settings_file=_per_coin_settings.bat
+RR=0.042442
+DET=0.173516
+LAM=0.261447
+MAXLINE=25
+ENTR=0.508164
+TT=2.442521
+TREND=0.000004

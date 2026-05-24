@@ -1,0 +1,13 @@
+TAU_A=2
+N=8760
+M=3
+W_FORMULA=1
+W_STP=51
+W_FINAL=5
+DECOR_METHOD=acf_zero
+FLOORED_AT_TAU=true
+SYMBOL=BTCUSD
+TAU=5
+ACF_FILE=C:\DCh\data\results\theiler_w\BTCUSD\BTCUSD_acf.dat
+STP_FILE=C:\DCh\data\results\theiler_w\BTCUSD\BTCUSD_stp.dat
+DATA_FILE=C:\DCh\data\BTCUSD_BITSTAMP_1h_complete_logreturns_cut.dat

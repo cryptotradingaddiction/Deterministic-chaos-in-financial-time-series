@@ -1,0 +1,8 @@
+Symbol      tau  m_optimal   E1@m_opt   E1@m_opt+1     E2_avg verdict                     
+BTCUSD        5          7     0.8518       0.8913     0.9960 E2~1 -> stochastic / noise-like
+ETHUSD        3          8     0.8998       0.9204     0.9967 E2~1 -> stochastic / noise-like
+LTCUSD        3          8     0.8742       0.9107     0.9955 E2~1 -> stochastic / noise-like
+XRPUSD        3          8     0.8951       0.9191     0.9954 E2~1 -> stochastic / noise-like
+LINKUSD       4          7     0.8583       0.8815     0.9941 E2~1 -> stochastic / noise-like
+DOGEUSD       6          7     0.8561       0.8958     0.9962 E2~1 -> stochastic / noise-like
+ADAUSD        2          8     0.8990       0.9115     0.9968 E2~1 -> stochastic / noise-like

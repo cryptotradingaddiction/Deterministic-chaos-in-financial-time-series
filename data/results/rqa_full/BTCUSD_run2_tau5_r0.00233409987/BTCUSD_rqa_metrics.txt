@@ -1,0 +1,9 @@
+RQA RESULTS (BTCUSD)
+# PyRQA params: tau=5, radius=0.00233409987 (percentile(4%)), config_radius=0.005, m=3, W=5 (per-coin W_D2 from theilers_w.bat), percentile=4%, settings_file=_per_coin_settings.bat
+RR=0.042379
+DET=0.170272
+LAM=0.263358
+MAXLINE=22
+ENTR=0.581742
+TT=2.481189
+TREND=0.000002

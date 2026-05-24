@@ -1,0 +1,11 @@
+================================================================================
+tau_w analysis - LINKUSD
+Input file : C:\DCh\data\LINKUSD_BITSTAMP_1h_complete_logreturns_cut.dat
+Series len : 8760
+================================================================================
+--- Results (LINKUSD) ---
+mean(x^2) = 6.833421e-05
+mean(dx)  = 1.880778e-06
+Semi-empirical tau_w ~= 10.4403
+Average period tau_p = 2.9997
+Final tau_w = max(tau_w, tau_p) = 10.4403

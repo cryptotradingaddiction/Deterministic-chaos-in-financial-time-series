@@ -1,0 +1,16 @@
+
+Processing XRPUSD_BITSTAMP_1h_complete_logreturns_cut: C:\DCh\data\XRPUSD_BITSTAMP_1h_complete_logreturns_cut.csv (tau=3)
+Series length N = 8760
+Embedding dimensions m = [2, 3, 4, 5, 10]
+Box sizes r in [0.0200, 0.5000] (40 values, log-spaced)
+--------------------------------------------------------------------------------
+  m        d_c    +/-95CI      R^2       window   points  flags
+--------------------------------------------------------------------------------
+  2     1.3420     0.0218   0.9975     0:39     40/40   -
+  3     1.6559     0.0383   0.9953     0:36     36/40   -
+  4     1.8507     0.0574   0.9933     0:29     29/40   -
+  5     1.9811     0.0942   0.9872     0:24     24/40   -
+ 10     3.9888     1.9187   0.7345     3:11     13/40   LOW_R2,SATURATION_HIGH
+--------------------------------------------------------------------------------
+Best m: m=2, d_c=1.3420 +/- 0.0218 (95% CI), R^2=0.9975
+Saved plot: C:\DCh\data\results\2dc\XRPUSD_BITSTAMP_1h_complete_logreturns_cut_2dc_capacity_dimension_tau3.png

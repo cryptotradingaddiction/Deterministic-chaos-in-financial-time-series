@@ -1,0 +1,10 @@
+# theiler-window summary TEST_MODE=false formula=ceil(tau_a*(2/N)^(2/m)) decor=acf_zero floor_at_tau=true
+# columns: symbol  N  tau_d2  tau_a  W_formula  W_stp  W_final
+#
+BTCUSD  8760  5  2  1  51  5
+ETHUSD  8760  3  2  1  45  3
+LTCUSD  8760  3  2  1  32  3
+XRPUSD  8760  3  6  1  31  3
+LINKUSD  8760  4  1  1  44  4
+DOGEUSD  8760  6  2  1  29  6
+ADAUSD  8760  2  2  1  31  2

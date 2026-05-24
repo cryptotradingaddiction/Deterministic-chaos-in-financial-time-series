@@ -1,0 +1,9 @@
+RQA RESULTS (DOGEUSD)
+# PyRQA params: tau=6, radius=0.004648864102 (percentile(4%)), config_radius=0.005, m=3, W=6 (per-coin W_D2 from theilers_w.bat), percentile=4%, settings_file=_per_coin_settings.bat
+RR=0.039962
+DET=0.140908
+LAM=0.221255
+MAXLINE=12
+ENTR=0.410366
+TT=2.289121
+TREND=0.000001

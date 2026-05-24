@@ -1,0 +1,15 @@
+  file: XRPUSD_takens.dat  size=25,120 B  lines=899
+  Takens plateau estimates per embedding m:
+     m          Takens D_T    pts
+     1              1.0439     99
+     2              1.9986     99
+     3              2.9668     99
+     4              3.8426     99
+     5              4.5055     93
+     6              5.8016     91
+     7              6.6504     74
+     8              7.3691     74
+     9              7.7695     73
+    10              8.5753     68
+  Takens saturation indicator (last 5 m = m=6..10 of the m=1..10 sweep): 7.3691
+  Ellner extension m=3: 3.3222  (plateau points=35, r_min=0.000317564, r_max=0.00340513)

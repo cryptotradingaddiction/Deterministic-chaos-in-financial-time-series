@@ -1,0 +1,85 @@
+Stationary-bootstrap hypothesis test (ADAUSD)
+Parameters: tau=2, W=2, seed=0, B=100, stationary_block_mean=sqrt(n), TS_threshold=3, metrics=RR,DET,LAM,MAXLINE,ENTR,TT,TREND, T_dof=3.5
+Original series: n=8760, mu_r=-0.000124, sigma_r=0.008141
+RQA radius mode: fixed (r=0.00474749)
+  RQA radius applied to ADAUSD_orig: r=0.00474749  (fixed (--rqa_radius))
+  RQA radius applied to ADAUSD_surr: r=0.00474749  (fixed (--rqa_radius))
+  RQA radius applied to ADAUSD_normal: r=0.00474749  (fixed (--rqa_radius))
+  RQA radius applied to ADAUSD_t3.5: r=0.00474749  (fixed (--rqa_radius))
+Surrogate: randperm (full random permutation, no blocking).
+Normal:    N(mu_r, sigma_r) of same length.
+t-series:  t(dof=3.5) scaled to (mu_r, sigma_r) of same length.
+RNG seed:  0 (reshuffle, reference series, stationary bootstrap).
+Stationary bootstrap: B pseudo-series from the original, with geometric block lengths.
+Reference invariants are recomputed for the active metrics; RQA: bootstrap-tested; recurrence radius locked from orig.
+Test: TS=(mean_bootstrap(invariant) - invariant_reference)/SD_bootstrap(invariant).
+  Decision: reject H0 if |TS| > 3; this indicates structure/memory as a prerequisite for chaos, not proof of chaos.
+  p-value: two-sided under Student-t with df = B - 1 (matches MATLAB '2*(1 - tcdf(|TS|, B-1))').
+  The TS test is repeated against THREE reference series per metric:
+    surr   = random permutation of the original (multi-set null)
+    normal = Gaussian N(mu_r, sigma_r) of same length
+    t3.5   = scaled Student-t(nu=3.5) of same length
+  Each reference is an independent null; the per-reference decision is reported below.
+Invariant value sources:
+  TAKENS — mean of the stable plateau of the c2t Takens-Theiler curve d_2^(T)(r') for m=3
+  ELLNER — Ellner extension (eq. 8.78) computed from .c2 over [r_min, r_max] auto-detected
+           from the same Takens plateau; reported SD is the Takens-plateau dispersion
+           (orientation of the interval quality).
+  LLE   — OLS slope of the highest-quality lyap_k S(t) block at m=3
+           (best ε-block by (window length / OLS std_err)); reported SD is the
+           OLS standard error of that slope, not a cross-block spread.
+  RQA   — PyRQA scalars (RR, DET, LAM, MAXLINE, ENTR, TT, TREND); radius locked from
+           orig when bootstrap-tested; Theiler W matches d2/lyap_k (-t, exclude |i-j|<=W).
+
+Series statistics (mean and SD of each series):
+  series              mean            sd
+  --------------------------------------
+  orig           -0.000124      0.008141
+  surr           -0.000124      0.008141
+  normal         -0.000217      0.008125
+  t3.5           -0.000129      0.007976
+
+Step 0 invariant comparison against noise references:
+  Invariant             orig          resh        normal          t3.5
+  ------------------------------------------------------------------
+  RR                  0.0412        0.0344        0.0181        0.0381
+  DET                 0.1192        0.0583        0.0319        0.0689
+  LAM                 0.1909        0.1129        0.0588        0.1323
+  MAXLINE            15.0000       11.0000        8.0000       10.0000
+  ENTR                1.1482        0.8928        0.7315        0.9197
+  TT                  2.4207        2.1974        2.0850        2.2349
+  TREND               0.0000       -0.0000       -0.0000        0.0000
+  Interpretation: compare original invariant values directly with reshuffle, Gaussian, and t(3.5) references.
+
+  Invariant     ref          boot_mean       boot_sd       B          orig       ref_val            TS        abs_TS       p_value  decision                  
+  ------------------------------------------------------------------------------------------------------------------------------------------------------------
+  RR            surr            0.0418        0.0034     100        0.0412        0.0344        2.1861        2.1861        0.0312    fail to reject H0         
+  RR            normal          0.0418        0.0034     100        0.0412        0.0181        7.0000        7.0000     3.096e-10    reject H0                 
+  RR            t3.5            0.0418        0.0034     100        0.0412        0.0381        1.0864        1.0864        0.2799    fail to reject H0         
+  DET           surr            0.1213        0.0099     100        0.1192        0.0583        6.3605        6.3605     6.253e-09    reject H0                 
+  DET           normal          0.1213        0.0099     100        0.1192        0.0319        9.0203        9.0203     1.496e-14    reject H0                 
+  DET           t3.5            0.1213        0.0099     100        0.1192        0.0689        5.2842        5.2842     7.523e-07    reject H0                 
+  LAM           surr            0.1909        0.0164     100        0.1909        0.1129        4.7478        4.7478     6.946e-06    reject H0                 
+  LAM           normal          0.1909        0.0164     100        0.1909        0.0588        8.0382        8.0382     1.988e-12    reject H0                 
+  LAM           t3.5            0.1909        0.0164     100        0.1909        0.1323        3.5644        3.5644     5.633e-04    reject H0                 
+  MAXLINE       surr          222.4800       57.2999     100       15.0000       11.0000        3.6908        3.6908     3.659e-04    reject H0                 
+  MAXLINE       normal        222.4800       57.2999     100       15.0000        8.0000        3.7431        3.7431     3.051e-04    reject H0                 
+  MAXLINE       t3.5          222.4800       57.2999     100       15.0000       10.0000        3.7082        3.7082     3.444e-04    reject H0                 
+  ENTR          surr            1.1546        0.0395     100        1.1482        0.8928        6.6266        6.6266     1.812e-09    reject H0                 
+  ENTR          normal          1.1546        0.0395     100        1.1482        0.7315       10.7070       10.7070     3.156e-18    reject H0                 
+  ENTR          t3.5            1.1546        0.0395     100        1.1482        0.9197        5.9448        5.9448     4.162e-08    reject H0                 
+  TT            surr            2.4121        0.0507     100        2.4207        2.1974        4.2366        4.2366     5.094e-05    reject H0                 
+  TT            normal          2.4121        0.0507     100        2.4207        2.0850        6.4526        6.4526     4.081e-09    reject H0                 
+  TT            t3.5            2.4121        0.0507     100        2.4207        2.2349        3.4964        3.4964     7.074e-04    reject H0                 
+  TREND         surr            0.0000        0.0000     100        0.0000       -0.0000        1.8368        1.8368        0.0692    fail to reject H0         
+  TREND         normal          0.0000        0.0000     100        0.0000       -0.0000        1.8121        1.8121        0.0730    fail to reject H0         
+  TREND         t3.5            0.0000        0.0000     100        0.0000        0.0000        1.6056        1.6056        0.1116    fail to reject H0         
+
+Conclusion (TS threshold=3):
+  RR        : surr=fail to reject H0 | normal=reject H0 | t3.5=fail to reject H0   [any reject]
+  DET       : surr=reject H0 | normal=reject H0 | t3.5=reject H0   [any reject]
+  LAM       : surr=reject H0 | normal=reject H0 | t3.5=reject H0   [any reject]
+  MAXLINE   : surr=reject H0 | normal=reject H0 | t3.5=reject H0   [any reject]
+  ENTR      : surr=reject H0 | normal=reject H0 | t3.5=reject H0   [any reject]
+  TT        : surr=reject H0 | normal=reject H0 | t3.5=reject H0   [any reject]
+  TREND     : surr=fail to reject H0 | normal=fail to reject H0 | t3.5=fail to reject H0   [no rejection]

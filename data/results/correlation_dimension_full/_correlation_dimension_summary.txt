@@ -1,0 +1,8 @@
+symbol,run,tau,W,d2_file,takens_file
+BTCUSD,run2_tau5_W5,5,5,C:\DCh\data\results\correlation_dimension_full\BTCUSD_run2_tau5_W5\BTCUSD.d2,C:\DCh\data\results\correlation_dimension_full\BTCUSD_run2_tau5_W5\BTCUSD_takens.dat
+ETHUSD,run2_tau3_W3,3,3,C:\DCh\data\results\correlation_dimension_full\ETHUSD_run2_tau3_W3\ETHUSD.d2,C:\DCh\data\results\correlation_dimension_full\ETHUSD_run2_tau3_W3\ETHUSD_takens.dat
+LTCUSD,run2_tau3_W3,3,3,C:\DCh\data\results\correlation_dimension_full\LTCUSD_run2_tau3_W3\LTCUSD.d2,C:\DCh\data\results\correlation_dimension_full\LTCUSD_run2_tau3_W3\LTCUSD_takens.dat
+XRPUSD,run2_tau3_W3,3,3,C:\DCh\data\results\correlation_dimension_full\XRPUSD_run2_tau3_W3\XRPUSD.d2,C:\DCh\data\results\correlation_dimension_full\XRPUSD_run2_tau3_W3\XRPUSD_takens.dat
+LINKUSD,run2_tau4_W4,4,4,C:\DCh\data\results\correlation_dimension_full\LINKUSD_run2_tau4_W4\LINKUSD.d2,C:\DCh\data\results\correlation_dimension_full\LINKUSD_run2_tau4_W4\LINKUSD_takens.dat
+DOGEUSD,run2_tau6_W6,6,6,C:\DCh\data\results\correlation_dimension_full\DOGEUSD_run2_tau6_W6\DOGEUSD.d2,C:\DCh\data\results\correlation_dimension_full\DOGEUSD_run2_tau6_W6\DOGEUSD_takens.dat
+ADAUSD,run2_tau2_W2,2,2,C:\DCh\data\results\correlation_dimension_full\ADAUSD_run2_tau2_W2\ADAUSD.d2,C:\DCh\data\results\correlation_dimension_full\ADAUSD_run2_tau2_W2\ADAUSD_takens.dat

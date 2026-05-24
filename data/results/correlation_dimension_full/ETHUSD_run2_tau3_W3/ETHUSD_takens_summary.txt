@@ -1,0 +1,15 @@
+  file: ETHUSD_takens.dat  size=25,035 B  lines=894
+  Takens plateau estimates per embedding m:
+     m          Takens D_T    pts
+     1              1.0467     99
+     2              1.9943     99
+     3              2.9741     99
+     4              3.9341     99
+     5              4.7055     97
+     6              6.0069     81
+     7              7.0464     78
+     8              7.8165     72
+     9              8.1357     72
+    10              9.3887     68
+  Takens saturation indicator (last 5 m = m=6..10 of the m=1..10 sweep): 7.8165
+  Ellner extension m=3: 2.7252  (plateau points=32, r_min=0.000360328, r_max=0.00313395)

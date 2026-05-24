@@ -1,0 +1,9 @@
+RQA RESULTS (XRPUSD)
+# PyRQA params: tau=3, radius=0.003754424555 (percentile(4%)), config_radius=0.005, m=3, W=3 (per-coin W_D2 from theilers_w.bat), percentile=4%, settings_file=_per_coin_settings.bat
+RR=0.040842
+DET=0.169598
+LAM=0.246032
+MAXLINE=23
+ENTR=0.415709
+TT=2.351164
+TREND=0.000004

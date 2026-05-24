@@ -1,0 +1,11 @@
+================================================================================
+tau_w analysis - ADAUSD
+Input file : C:\DCh\data\ADAUSD_BITSTAMP_1h_complete_logreturns_cut.dat
+Series len : 8760
+================================================================================
+--- Results (ADAUSD) ---
+mean(x^2) = 6.629176e-05
+mean(dx)  = 1.375367e-07
+Semi-empirical tau_w ~= 38.0260
+Average period tau_p = 3.0058
+Final tau_w = max(tau_w, tau_p) = 38.0260

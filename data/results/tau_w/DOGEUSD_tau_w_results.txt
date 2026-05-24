@@ -1,0 +1,11 @@
+================================================================================
+tau_w analysis - DOGEUSD
+Input file : C:\DCh\data\DOGEUSD_BITSTAMP_1h_complete_logreturns_cut.dat
+Series len : 8760
+================================================================================
+--- Results (DOGEUSD) ---
+mean(x^2) = 7.020151e-05
+mean(dx)  = 1.279537e-06
+Semi-empirical tau_w ~= 12.8294
+Average period tau_p = 3.0245
+Final tau_w = max(tau_w, tau_p) = 12.8294

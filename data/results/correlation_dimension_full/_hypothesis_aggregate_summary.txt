@@ -1,0 +1,90 @@
+Hypothesis pipeline - aggregated summary
+Scanned root : C:\DCh\data\results\correlation_dimension_full
+Files found  : 7
+==============================================================================================================
+
+Symbol    tau   W   B ELLNER_orig ELLNER_boot ELLNER_boot_sd ELLNER_resh ELLNER_normal ELLNER_t3.5   TS_ELLNER absTS_ELLNER TS_ELLNER_surr p_ELLNER_surr TS_ELLNER_normal p_ELLNER_normal TS_ELLNER_t3.5 p_ELLNER_t3.5 rej_all
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ADAUSD      2   2 100      3.3019      2.4391      0.2353      2.7516      3.2344      3.3472     -1.3277      1.3277     -1.3277      0.1873     -3.3794      0.0010     -3.8584   2.034e-04      NO
+BTCUSD      5   5 100      2.7649      2.4916      0.2255      3.2931      3.2430      2.7243     -3.5544      3.5544     -3.5544   5.825e-04     -3.3323      0.0012     -1.0321      0.3045     YES
+DOGEUSD     6   6 100      2.7460      2.4031      0.2887      2.7076      3.2948      2.7304     -1.0548      1.0548     -1.0548      0.2941     -3.0890      0.0026     -1.1340      0.2595      NO
+ETHUSD      3   3 100      2.7252      2.4233      0.2121      3.3223      2.9539      2.7237     -4.2381      4.2381     -4.2381   5.065e-05     -2.5014      0.0140     -1.4162      0.1598     YES
+LINKUSD     4   4 100      2.0735      2.5123      0.2248      2.6998      2.7145      2.7194     -0.8342      0.8342     -0.8342      0.4062     -0.8993      0.3707     -0.9212      0.3592      NO
+LTCUSD      3   3 100      2.7424      2.2030      0.3996      2.7125      2.9539      3.3013     -1.2751      1.2751     -1.2751      0.2052     -1.8792      0.0632     -2.7487      0.0071      NO
+XRPUSD      3   3 100      3.3222      2.4904      0.2334      3.2489      2.4790      2.7237     -3.2500      3.2500     -3.2500      0.0016      0.0490      0.9610     -0.9996      0.3199     YES
+
+Current format: stationary-bootstrap TS test against 3 null references.
+  boot     = mean across B stationary-bootstrap invariant values
+  boot_sd  = sample SD of the bootstrap invariant distribution
+  resh     = invariant on one random-permutation surrogate (null #1)
+  normal   = invariant on a Gaussian N(mu_r, sigma_r) series (null #2)
+  t3.5     = invariant on a scaled Student-t(3.5) series (null #3)
+  TS_<metric>            = TS against surr (kept for back-compat)
+  TS_<metric>_<ref>      = TS = (boot - <ref>) / boot_sd
+  p_<metric>_<ref>       = two-sided Student-t p-value with df = B - 1
+  rej_all                = YES iff every metric rejects H0 vs. surr (|TS| > 3)
+Per-reference decisions are listed inside each per-source block below.
+
+==============================================================================================================
+Source: C:\DCh\data\results\correlation_dimension_full\ADAUSD_run2_tau2_W2\hypothesis_d2\ADAUSD_surrogate_summary.txt
+Symbol: ADAUSD   Mode: FULL   N: 8760
+  tau=2, W=2, B=100
+  metric   ref            orig       boot    boot_sd    ref_val     B         TS     abs_TS     p-value  decision
+  ELLNER   surr         3.3019     2.4391     0.2353     2.7516   100    -1.3277     1.3277      0.1873  fail to reject H0
+  ELLNER   normal       3.3019     2.4391     0.2353     3.2344   100    -3.3794     3.3794      0.0010  reject H0
+  ELLNER   t3.5         3.3019     2.4391     0.2353     3.3472   100    -3.8584     3.8584   2.034e-04  reject H0
+
+==============================================================================================================
+Source: C:\DCh\data\results\correlation_dimension_full\BTCUSD_run2_tau5_W5\hypothesis_d2\BTCUSD_surrogate_summary.txt
+Symbol: BTCUSD   Mode: FULL   N: 8760
+  tau=5, W=5, B=100
+  metric   ref            orig       boot    boot_sd    ref_val     B         TS     abs_TS     p-value  decision
+  ELLNER   surr         2.7649     2.4916     0.2255     3.2931   100    -3.5544     3.5544   5.825e-04  reject H0
+  ELLNER   normal       2.7649     2.4916     0.2255     3.2430   100    -3.3323     3.3323      0.0012  reject H0
+  ELLNER   t3.5         2.7649     2.4916     0.2255     2.7243   100    -1.0321     1.0321      0.3045  fail to reject H0
+
+==============================================================================================================
+Source: C:\DCh\data\results\correlation_dimension_full\DOGEUSD_run2_tau6_W6\hypothesis_d2\DOGEUSD_surrogate_summary.txt
+Symbol: DOGEUSD   Mode: FULL   N: 8760
+  tau=6, W=6, B=100
+  metric   ref            orig       boot    boot_sd    ref_val     B         TS     abs_TS     p-value  decision
+  ELLNER   surr         2.7460     2.4031     0.2887     2.7076   100    -1.0548     1.0548      0.2941  fail to reject H0
+  ELLNER   normal       2.7460     2.4031     0.2887     3.2948   100    -3.0890     3.0890      0.0026  reject H0
+  ELLNER   t3.5         2.7460     2.4031     0.2887     2.7304   100    -1.1340     1.1340      0.2595  fail to reject H0
+
+==============================================================================================================
+Source: C:\DCh\data\results\correlation_dimension_full\ETHUSD_run2_tau3_W3\hypothesis_d2\ETHUSD_surrogate_summary.txt
+Symbol: ETHUSD   Mode: FULL   N: 8760
+  tau=3, W=3, B=100
+  metric   ref            orig       boot    boot_sd    ref_val     B         TS     abs_TS     p-value  decision
+  ELLNER   surr         2.7252     2.4233     0.2121     3.3223   100    -4.2381     4.2381   5.065e-05  reject H0
+  ELLNER   normal       2.7252     2.4233     0.2121     2.9539   100    -2.5014     2.5014      0.0140  fail to reject H0
+  ELLNER   t3.5         2.7252     2.4233     0.2121     2.7237   100    -1.4162     1.4162      0.1598  fail to reject H0
+
+==============================================================================================================
+Source: C:\DCh\data\results\correlation_dimension_full\LINKUSD_run2_tau4_W4\hypothesis_d2\LINKUSD_surrogate_summary.txt
+Symbol: LINKUSD   Mode: FULL   N: 8760
+  tau=4, W=4, B=100
+  metric   ref            orig       boot    boot_sd    ref_val     B         TS     abs_TS     p-value  decision
+  ELLNER   surr         2.0735     2.5123     0.2248     2.6998   100    -0.8342     0.8342      0.4062  fail to reject H0
+  ELLNER   normal       2.0735     2.5123     0.2248     2.7145   100    -0.8993     0.8993      0.3707  fail to reject H0
+  ELLNER   t3.5         2.0735     2.5123     0.2248     2.7194   100    -0.9212     0.9212      0.3592  fail to reject H0
+
+==============================================================================================================
+Source: C:\DCh\data\results\correlation_dimension_full\LTCUSD_run2_tau3_W3\hypothesis_d2\LTCUSD_surrogate_summary.txt
+Symbol: LTCUSD   Mode: FULL   N: 8760
+  tau=3, W=3, B=100
+  metric   ref            orig       boot    boot_sd    ref_val     B         TS     abs_TS     p-value  decision
+  ELLNER   surr         2.7424     2.2030     0.3996     2.7125   100    -1.2751     1.2751      0.2052  fail to reject H0
+  ELLNER   normal       2.7424     2.2030     0.3996     2.9539   100    -1.8792     1.8792      0.0632  fail to reject H0
+  ELLNER   t3.5         2.7424     2.2030     0.3996     3.3013   100    -2.7487     2.7487      0.0071  fail to reject H0
+
+==============================================================================================================
+Source: C:\DCh\data\results\correlation_dimension_full\XRPUSD_run2_tau3_W3\hypothesis_d2\XRPUSD_surrogate_summary.txt
+Symbol: XRPUSD   Mode: FULL   N: 8760
+  tau=3, W=3, B=100
+  metric   ref            orig       boot    boot_sd    ref_val     B         TS     abs_TS     p-value  decision
+  ELLNER   surr         3.3222     2.4904     0.2334     3.2489   100    -3.2500     3.2500      0.0016  reject H0
+  ELLNER   normal       3.3222     2.4904     0.2334     2.4790   100     0.0490     0.0490      0.9610  fail to reject H0
+  ELLNER   t3.5         3.3222     2.4904     0.2334     2.7237   100    -0.9996     0.9996      0.3199  fail to reject H0
+

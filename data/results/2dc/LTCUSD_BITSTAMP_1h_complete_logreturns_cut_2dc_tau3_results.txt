@@ -1,0 +1,16 @@
+
+Processing LTCUSD_BITSTAMP_1h_complete_logreturns_cut: C:\DCh\data\LTCUSD_BITSTAMP_1h_complete_logreturns_cut.csv (tau=3)
+Series length N = 8760
+Embedding dimensions m = [2, 3, 4, 5, 10]
+Box sizes r in [0.0200, 0.5000] (40 values, log-spaced)
+--------------------------------------------------------------------------------
+  m        d_c    +/-95CI      R^2       window   points  flags
+--------------------------------------------------------------------------------
+  2     1.2277     0.0254   0.9958     0:40     40/40   -
+  3     1.5020     0.0243   0.9974     0:40     40/40   -
+  4     1.6582     0.0433   0.9944     0:34     34/40   -
+  5     1.8645     0.0777   0.9893     0:26     29/40   -
+ 10     4.0933     2.1403   0.7008     5:13     16/40   LOW_R2,SATURATION_HIGH
+--------------------------------------------------------------------------------
+Best m: m=3, d_c=1.5020 +/- 0.0243 (95% CI), R^2=0.9974
+Saved plot: C:\DCh\data\results\2dc\LTCUSD_BITSTAMP_1h_complete_logreturns_cut_2dc_capacity_dimension_tau3.png

@@ -1,0 +1,11 @@
+================================================================================
+tau_w analysis - ETHUSD
+Input file : C:\DCh\data\ETHUSD_BITSTAMP_1h_complete_logreturns_cut.dat
+Series len : 8760
+================================================================================
+--- Results (ETHUSD) ---
+mean(x^2) = 4.630495e-05
+mean(dx)  = 1.819088e-06
+Semi-empirical tau_w ~= 8.7387
+Average period tau_p = 3.0256
+Final tau_w = max(tau_w, tau_p) = 8.7387

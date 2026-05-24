@@ -1,0 +1,16 @@
+
+Processing LINKUSD_BITSTAMP_1h_complete_logreturns_cut: C:\DCh\data\LINKUSD_BITSTAMP_1h_complete_logreturns_cut.csv (tau=4)
+Series length N = 8760
+Embedding dimensions m = [2, 3, 4, 5, 10]
+Box sizes r in [0.0200, 0.5000] (40 values, log-spaced)
+--------------------------------------------------------------------------------
+  m        d_c    +/-95CI      R^2       window   points  flags
+--------------------------------------------------------------------------------
+  2     1.4359     0.0213   0.9978     0:40     40/40   -
+  3     1.7496     0.0321   0.9971     0:35     35/40   -
+  4     1.9722     0.0571   0.9946     0:27     27/40   -
+  5     2.0793     0.1056   0.9861     0:23     23/40   SATURATION_HIGH
+ 10     2.4474     1.0736   0.7689     0:8      11/40   LOW_R2,SATURATION_HIGH
+--------------------------------------------------------------------------------
+Best m: m=2, d_c=1.4359 +/- 0.0213 (95% CI), R^2=0.9978
+Saved plot: C:\DCh\data\results\2dc\LINKUSD_BITSTAMP_1h_complete_logreturns_cut_2dc_capacity_dimension_tau4.png

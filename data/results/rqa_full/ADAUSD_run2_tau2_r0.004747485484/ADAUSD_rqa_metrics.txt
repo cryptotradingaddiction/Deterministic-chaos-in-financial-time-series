@@ -1,0 +1,9 @@
+RQA RESULTS (ADAUSD)
+# PyRQA params: tau=2, radius=0.004747485484 (percentile(4%)), config_radius=0.005, m=3, W=2 (per-coin W_D2 from theilers_w.bat), percentile=4%, settings_file=_per_coin_settings.bat
+RR=0.041213
+DET=0.119240
+LAM=0.190949
+MAXLINE=15
+ENTR=1.148194
+TT=2.420729
+TREND=0.000002

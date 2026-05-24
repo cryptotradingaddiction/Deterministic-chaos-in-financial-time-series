@@ -1,0 +1,49 @@
+Stationary-bootstrap hypothesis test (ADAUSD)
+Parameters: tau=2, W=2, seed=0, B=100, stationary_block_mean=sqrt(n), TS_threshold=3, metrics=LLE, T_dof=3.5
+Original series: n=8760, mu_r=-0.000124, sigma_r=0.008141
+RQA radius mode: percentile (p=4%, m=3, tau=2); fallback fixed radius = 0.005
+Surrogate: randperm (full random permutation, no blocking).
+Normal:    N(mu_r, sigma_r) of same length.
+t-series:  t(dof=3.5) scaled to (mu_r, sigma_r) of same length.
+RNG seed:  0 (reshuffle, reference series, stationary bootstrap).
+Stationary bootstrap: B pseudo-series from the original, with geometric block lengths.
+Reference invariants are recomputed for the active metrics.
+Test: TS=(mean_bootstrap(invariant) - invariant_reference)/SD_bootstrap(invariant).
+  Decision: reject H0 if |TS| > 3; this indicates structure/memory as a prerequisite for chaos, not proof of chaos.
+  p-value: two-sided under Student-t with df = B - 1 (matches MATLAB '2*(1 - tcdf(|TS|, B-1))').
+  The TS test is repeated against THREE reference series per metric:
+    surr   = random permutation of the original (multi-set null)
+    normal = Gaussian N(mu_r, sigma_r) of same length
+    t3.5   = scaled Student-t(nu=3.5) of same length
+  Each reference is an independent null; the per-reference decision is reported below.
+Invariant value sources:
+  TAKENS — mean of the stable plateau of the c2t Takens-Theiler curve d_2^(T)(r') for m=3
+  ELLNER — Ellner extension (eq. 8.78) computed from .c2 over [r_min, r_max] auto-detected
+           from the same Takens plateau; reported SD is the Takens-plateau dispersion
+           (orientation of the interval quality).
+  LLE   — OLS slope of the highest-quality lyap_k S(t) block at m=3
+           (best ε-block by (window length / OLS std_err)); reported SD is the
+           OLS standard error of that slope, not a cross-block spread.
+
+Series statistics (mean and SD of each series):
+  series              mean            sd
+  --------------------------------------
+  orig           -0.000124      0.008141
+  surr           -0.000124      0.008141
+  normal         -0.000217      0.008125
+  t3.5           -0.000129      0.007976
+
+Step 0 invariant comparison against noise references:
+  Invariant             orig          resh        normal          t3.5
+  ------------------------------------------------------------------
+  LLE                -0.0030       -0.0088       -0.0134       -0.0158
+  Interpretation: compare original invariant values directly with reshuffle, Gaussian, and t(3.5) references.
+
+  Invariant     ref          boot_mean       boot_sd       B          orig       ref_val            TS        abs_TS       p_value  decision                  
+  ------------------------------------------------------------------------------------------------------------------------------------------------------------
+  LLE           surr            0.0040        0.0105     100       -0.0030       -0.0088        1.2228        1.2228        0.2243    fail to reject H0         
+  LLE           normal          0.0040        0.0105     100       -0.0030       -0.0134        1.6621        1.6621        0.0997    fail to reject H0         
+  LLE           t3.5            0.0040        0.0105     100       -0.0030       -0.0158        1.8891        1.8891        0.0618    fail to reject H0         
+
+Conclusion (TS threshold=3):
+  LLE       : surr=fail to reject H0 | normal=fail to reject H0 | t3.5=fail to reject H0   [no rejection]

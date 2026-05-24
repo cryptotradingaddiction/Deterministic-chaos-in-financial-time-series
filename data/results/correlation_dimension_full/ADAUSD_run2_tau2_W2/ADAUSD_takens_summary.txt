@@ -1,0 +1,15 @@
+  file: ADAUSD_takens.dat  size=24,823 B  lines=891
+  Takens plateau estimates per embedding m:
+     m          Takens D_T    pts
+     1              1.0478     99
+     2              2.0003     99
+     3              2.9761     99
+     4              3.8894     99
+     5              4.7772     94
+     6              5.7042     83
+     7              6.7948     75
+     8              7.4790     73
+     9              7.7912     71
+    10              9.3603     69
+  Takens saturation indicator (last 5 m = m=6..10 of the m=1..10 sweep): 7.4790
+  Ellner extension m=3: 3.3019  (plateau points=34, r_min=0.000470368, r_max=0.00470368)

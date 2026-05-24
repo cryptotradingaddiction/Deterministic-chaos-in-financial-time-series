@@ -1,0 +1,8 @@
+symbol,run,tau,W,lyap_file
+BTCUSD,run2_tau5_W5,5,5,C:\DCh\data\results\lambda_max_full\BTCUSD_run2_tau5_W5\BTCUSD_lyap.txt
+ETHUSD,run2_tau3_W3,3,3,C:\DCh\data\results\lambda_max_full\ETHUSD_run2_tau3_W3\ETHUSD_lyap.txt
+LTCUSD,run2_tau3_W3,3,3,C:\DCh\data\results\lambda_max_full\LTCUSD_run2_tau3_W3\LTCUSD_lyap.txt
+XRPUSD,run2_tau3_W3,3,3,C:\DCh\data\results\lambda_max_full\XRPUSD_run2_tau3_W3\XRPUSD_lyap.txt
+LINKUSD,run2_tau4_W4,4,4,C:\DCh\data\results\lambda_max_full\LINKUSD_run2_tau4_W4\LINKUSD_lyap.txt
+DOGEUSD,run2_tau6_W6,6,6,C:\DCh\data\results\lambda_max_full\DOGEUSD_run2_tau6_W6\DOGEUSD_lyap.txt
+ADAUSD,run2_tau2_W2,2,2,C:\DCh\data\results\lambda_max_full\ADAUSD_run2_tau2_W2\ADAUSD_lyap.txt

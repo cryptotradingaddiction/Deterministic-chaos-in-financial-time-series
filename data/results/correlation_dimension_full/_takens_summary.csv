@@ -1,0 +1,8 @@
+symbol,run,tau,W,takens_file,ellner_m3,plateau_points,r_min_m3,r_max_m3
+BTCUSD,run2_tau5_W5,5,5,C:\DCh\data\results\correlation_dimension_full\BTCUSD_run2_tau5_W5\BTCUSD_takens.dat,2.764869793,35,0.000167834442,0.00179963419
+ETHUSD,run2_tau3_W3,3,3,C:\DCh\data\results\correlation_dimension_full\ETHUSD_run2_tau3_W3\ETHUSD_takens.dat,2.725181205,32,0.000360327627,0.0031339475
+LTCUSD,run2_tau3_W3,3,3,C:\DCh\data\results\correlation_dimension_full\LTCUSD_run2_tau3_W3\LTCUSD_takens.dat,2.742350943,30,0.00047221675,0.00357214781
+XRPUSD,run2_tau3_W3,3,3,C:\DCh\data\results\correlation_dimension_full\XRPUSD_run2_tau3_W3\XRPUSD_takens.dat,3.322150223,35,0.000317563885,0.0034051314
+LINKUSD,run2_tau4_W4,4,4,C:\DCh\data\results\correlation_dimension_full\LINKUSD_run2_tau4_W4\LINKUSD_takens.dat,2.073542843,58,0.000209315825,0.0111705605
+DOGEUSD,run2_tau6_W6,6,6,C:\DCh\data\results\correlation_dimension_full\DOGEUSD_run2_tau6_W6\DOGEUSD_takens.dat,2.745991291,32,0.000486130913,0.00422812067
+ADAUSD,run2_tau2_W2,2,2,C:\DCh\data\results\correlation_dimension_full\ADAUSD_run2_tau2_W2\ADAUSD_takens.dat,3.301924684,34,0.000470367668,0.00470367679

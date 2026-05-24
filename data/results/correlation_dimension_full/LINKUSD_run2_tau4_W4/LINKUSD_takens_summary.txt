@@ -1,0 +1,15 @@
+  file: LINKUSD_takens.dat  size=24,745 B  lines=887
+  Takens plateau estimates per embedding m:
+     m          Takens D_T    pts
+     1              1.0515     99
+     2              1.9478     99
+     3              2.6773     99
+     4              3.6668     99
+     5              4.6665     98
+     6              5.6699     81
+     7              6.1106     81
+     8              7.4730     70
+     9              8.5112     67
+    10              8.3144     64
+  Takens saturation indicator (last 5 m = m=6..10 of the m=1..10 sweep): 7.4730
+  Ellner extension m=3: 2.0735  (plateau points=58, r_min=0.000209316, r_max=0.0111706)

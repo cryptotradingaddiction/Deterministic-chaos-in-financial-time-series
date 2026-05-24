@@ -1,0 +1,11 @@
+================================================================================
+tau_w analysis - LTCUSD
+Input file : C:\DCh\data\LTCUSD_BITSTAMP_1h_complete_logreturns_cut.dat
+Series len : 8760
+================================================================================
+--- Results (LTCUSD) ---
+mean(x^2) = 5.168400e-05
+mean(dx)  = 2.499659e-06
+Semi-empirical tau_w ~= 7.8759
+Average period tau_p = 2.9833
+Final tau_w = max(tau_w, tau_p) = 7.8759

@@ -1,0 +1,11 @@
+================================================================================
+tau_w analysis - XRPUSD
+Input file : C:\DCh\data\XRPUSD_BITSTAMP_1h_complete_logreturns_cut.dat
+Series len : 8760
+================================================================================
+--- Results (XRPUSD) ---
+mean(x^2) = 4.819337e-05
+mean(dx)  = 1.104718e-06
+Semi-empirical tau_w ~= 11.4401
+Average period tau_p = 3.0141
+Final tau_w = max(tau_w, tau_p) = 11.4401

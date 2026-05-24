@@ -1,0 +1,8 @@
+series_id                                       tau best_m        d_c    +/-95CI      R^2 note                                    
+BTCUSD_BITSTAMP_1h_complete_logreturns_cut        5      2     1.3819     0.0168   0.9986 best m=2 (d_c=1.382+/-0.017)            
+ETHUSD_BITSTAMP_1h_complete_logreturns_cut        3      2     1.4125     0.0186   0.9983 best m=2 (d_c=1.412+/-0.019)            
+LTCUSD_BITSTAMP_1h_complete_logreturns_cut        3      3     1.5020     0.0243   0.9974 best m=3 (d_c=1.502+/-0.024)            
+XRPUSD_BITSTAMP_1h_complete_logreturns_cut        3      2     1.3420     0.0218   0.9975 best m=2 (d_c=1.342+/-0.022)            
+LINKUSD_BITSTAMP_1h_complete_logreturns_cut       4      2     1.4359     0.0213   0.9978 best m=2 (d_c=1.436+/-0.021)            
+DOGEUSD_BITSTAMP_1h_complete_logreturns_cut       6      2     1.2708     0.0315   0.9939 best m=2 (d_c=1.271+/-0.032)            
+ADAUSD_BITSTAMP_1h_complete_logreturns_cut        2      2     1.3233     0.0238   0.9968 best m=2 (d_c=1.323+/-0.024)            

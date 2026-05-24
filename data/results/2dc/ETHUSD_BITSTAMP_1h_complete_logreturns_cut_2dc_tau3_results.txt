@@ -1,0 +1,16 @@
+
+Processing ETHUSD_BITSTAMP_1h_complete_logreturns_cut: C:\DCh\data\ETHUSD_BITSTAMP_1h_complete_logreturns_cut.csv (tau=3)
+Series length N = 8760
+Embedding dimensions m = [2, 3, 4, 5, 10]
+Box sizes r in [0.0200, 0.5000] (40 values, log-spaced)
+--------------------------------------------------------------------------------
+  m        d_c    +/-95CI      R^2       window   points  flags
+--------------------------------------------------------------------------------
+  2     1.4125     0.0186   0.9983     0:40     40/40   -
+  3     1.7175     0.0216   0.9986     0:36     36/40   -
+  4     1.9159     0.0330   0.9979     0:29     29/40   -
+  5     2.0075     0.0813   0.9907     0:24     24/40   -
+ 10     2.0957     0.9476   0.7580     0:8      12/40   LOW_R2,SATURATION_HIGH
+--------------------------------------------------------------------------------
+Best m: m=2, d_c=1.4125 +/- 0.0186 (95% CI), R^2=0.9983
+Saved plot: C:\DCh\data\results\2dc\ETHUSD_BITSTAMP_1h_complete_logreturns_cut_2dc_capacity_dimension_tau3.png

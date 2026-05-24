@@ -1,0 +1,11 @@
+================================================================================
+tau_w analysis - BTCUSD
+Input file : C:\DCh\data\BTCUSD_BITSTAMP_1h_complete_logreturns_cut.dat
+Series len : 8760
+================================================================================
+--- Results (BTCUSD) ---
+mean(x^2) = 1.958277e-05
+mean(dx)  = 1.509911e-06
+Semi-empirical tau_w ~= 6.2377
+Average period tau_p = 3.0266
+Final tau_w = max(tau_w, tau_p) = 6.2377

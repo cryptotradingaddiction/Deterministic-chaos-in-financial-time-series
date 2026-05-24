@@ -1,0 +1,15 @@
+  file: DOGEUSD_takens.dat  size=24,983 B  lines=900
+  Takens plateau estimates per embedding m:
+     m          Takens D_T    pts
+     1              1.0534     99
+     2              1.9907     99
+     3              2.9646     99
+     4              3.8946     99
+     5              4.5011     98
+     6              5.8480     86
+     7              6.5421     80
+     8              7.2664     73
+     9              8.1813     70
+    10              9.5925     67
+  Takens saturation indicator (last 5 m = m=6..10 of the m=1..10 sweep): 7.2664
+  Ellner extension m=3: 2.7460  (plateau points=32, r_min=0.000486131, r_max=0.00422812)

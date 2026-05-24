@@ -1,0 +1,16 @@
+
+Processing DOGEUSD_BITSTAMP_1h_complete_logreturns_cut: C:\DCh\data\DOGEUSD_BITSTAMP_1h_complete_logreturns_cut.csv (tau=6)
+Series length N = 8760
+Embedding dimensions m = [2, 3, 4, 5, 10]
+Box sizes r in [0.0200, 0.5000] (40 values, log-spaced)
+--------------------------------------------------------------------------------
+  m        d_c    +/-95CI      R^2       window   points  flags
+--------------------------------------------------------------------------------
+  2     1.2708     0.0315   0.9939     0:40     40/40   -
+  3     1.6344     0.0385   0.9947     0:39     39/40   -
+  4     1.8584     0.0615   0.9915     0:32     32/40   -
+  5     2.0457     0.1024   0.9840     0:27     27/40   -
+ 10     2.5202     0.8763   0.6942     0:16     16/40   LOW_R2,SATURATION_HIGH
+--------------------------------------------------------------------------------
+Best m: m=2, d_c=1.2708 +/- 0.0315 (95% CI), R^2=0.9939
+Saved plot: C:\DCh\data\results\2dc\DOGEUSD_BITSTAMP_1h_complete_logreturns_cut_2dc_capacity_dimension_tau6.png

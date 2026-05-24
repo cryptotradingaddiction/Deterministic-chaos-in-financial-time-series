@@ -1,0 +1,16 @@
+
+Processing ADAUSD_BITSTAMP_1h_complete_logreturns_cut: C:\DCh\data\ADAUSD_BITSTAMP_1h_complete_logreturns_cut.csv (tau=2)
+Series length N = 8760
+Embedding dimensions m = [2, 3, 4, 5, 10]
+Box sizes r in [0.0200, 0.5000] (40 values, log-spaced)
+--------------------------------------------------------------------------------
+  m        d_c    +/-95CI      R^2       window   points  flags
+--------------------------------------------------------------------------------
+  2     1.3233     0.0238   0.9968     0:40     40/40   -
+  3     1.6521     0.0294   0.9970     0:38     38/40   -
+  4     1.8748     0.0569   0.9931     0:31     31/40   -
+  5     1.9986     0.0599   0.9956     0:21     26/40   -
+ 10     2.6904     1.1073   0.6734     0:13     14/40   LOW_R2,SATURATION_HIGH
+--------------------------------------------------------------------------------
+Best m: m=2, d_c=1.3233 +/- 0.0238 (95% CI), R^2=0.9968
+Saved plot: C:\DCh\data\results\2dc\ADAUSD_BITSTAMP_1h_complete_logreturns_cut_2dc_capacity_dimension_tau2.png

@@ -1,0 +1,9 @@
+RQA RESULTS (LINKUSD)
+# PyRQA params: tau=4, radius=0.004832899779 (percentile(4%)), config_radius=0.005, m=3, W=4 (per-coin W_D2 from theilers_w.bat), percentile=4%, settings_file=_per_coin_settings.bat
+RR=0.040716
+DET=0.142839
+LAM=0.208173
+MAXLINE=22
+ENTR=0.431062
+TT=2.313735
+TREND=0.000003

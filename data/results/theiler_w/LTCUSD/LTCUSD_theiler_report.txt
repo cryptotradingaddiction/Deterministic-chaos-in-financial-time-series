@@ -1,0 +1,13 @@
+TAU_A=2
+N=8760
+M=3
+W_FORMULA=1
+W_STP=32
+W_FINAL=3
+DECOR_METHOD=acf_zero
+FLOORED_AT_TAU=true
+SYMBOL=LTCUSD
+TAU=3
+ACF_FILE=C:\DCh\data\results\theiler_w\LTCUSD\LTCUSD_acf.dat
+STP_FILE=C:\DCh\data\results\theiler_w\LTCUSD\LTCUSD_stp.dat
+DATA_FILE=C:\DCh\data\LTCUSD_BITSTAMP_1h_complete_logreturns_cut.dat

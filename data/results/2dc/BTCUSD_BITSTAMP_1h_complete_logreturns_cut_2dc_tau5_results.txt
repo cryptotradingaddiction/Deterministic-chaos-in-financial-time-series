@@ -1,0 +1,16 @@
+
+Processing BTCUSD_BITSTAMP_1h_complete_logreturns_cut: C:\DCh\data\BTCUSD_BITSTAMP_1h_complete_logreturns_cut.csv (tau=5)
+Series length N = 8760
+Embedding dimensions m = [2, 3, 4, 5, 10]
+Box sizes r in [0.0200, 0.5000] (40 values, log-spaced)
+--------------------------------------------------------------------------------
+  m        d_c    +/-95CI      R^2       window   points  flags
+--------------------------------------------------------------------------------
+  2     1.3819     0.0168   0.9986     0:39     40/40   -
+  3     1.6667     0.0250   0.9981     0:34     35/40   -
+  4     1.9132     0.0587   0.9939     0:27     27/40   -
+  5     2.0451     0.1109   0.9842     0:23     23/40   SATURATION_HIGH
+ 10     2.9581     1.2747   0.7752     0:8      11/40   LOW_R2,SATURATION_HIGH
+--------------------------------------------------------------------------------
+Best m: m=2, d_c=1.3819 +/- 0.0168 (95% CI), R^2=0.9986
+Saved plot: C:\DCh\data\results\2dc\BTCUSD_BITSTAMP_1h_complete_logreturns_cut_2dc_capacity_dimension_tau5.png

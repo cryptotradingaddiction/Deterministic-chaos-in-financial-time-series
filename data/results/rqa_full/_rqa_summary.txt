@@ -1,0 +1,8 @@
+symbol,run,tau,radius,rec_file
+BTCUSD,run2_tau5_r0.00233409987,5,0.00233409987,C:\DCh\data\results\rqa_full\BTCUSD_run2_tau5_r0.00233409987\BTCUSD_recurr.txt
+ETHUSD,run2_tau3_r0.003593780875,3,0.003593780875,C:\DCh\data\results\rqa_full\ETHUSD_run2_tau3_r0.003593780875\ETHUSD_recurr.txt
+LTCUSD,run2_tau3_r0.003824319373,3,0.003824319373,C:\DCh\data\results\rqa_full\LTCUSD_run2_tau3_r0.003824319373\LTCUSD_recurr.txt
+XRPUSD,run2_tau3_r0.003754424555,3,0.003754424555,C:\DCh\data\results\rqa_full\XRPUSD_run2_tau3_r0.003754424555\XRPUSD_recurr.txt
+LINKUSD,run2_tau4_r0.004832899779,4,0.004832899779,C:\DCh\data\results\rqa_full\LINKUSD_run2_tau4_r0.004832899779\LINKUSD_recurr.txt
+DOGEUSD,run2_tau6_r0.004648864102,6,0.004648864102,C:\DCh\data\results\rqa_full\DOGEUSD_run2_tau6_r0.004648864102\DOGEUSD_recurr.txt
+ADAUSD,run2_tau2_r0.004747485484,2,0.004747485484,C:\DCh\data\results\rqa_full\ADAUSD_run2_tau2_r0.004747485484\ADAUSD_recurr.txt

@@ -1,0 +1,8 @@
+series_id                                             N  max_tau  first_min_tau    I(first_min) [bits]  I(tau=1) [bits]
+BTCUSD_BITSTAMP_1h_complete_logreturns_cut         8760      100              5                 0.5030           0.7272
+ETHUSD_BITSTAMP_1h_complete_logreturns_cut         8760      100              3                 0.4427           0.6052
+LTCUSD_BITSTAMP_1h_complete_logreturns_cut         8760      100              3                 0.4594           0.6900
+XRPUSD_BITSTAMP_1h_complete_logreturns_cut         8760      100              3                 0.3710           0.6674
+LINKUSD_BITSTAMP_1h_complete_logreturns_cut        8760      100              4                 0.3647           1.4820
+DOGEUSD_BITSTAMP_1h_complete_logreturns_cut        8760      100              6                 0.2267           0.7695
+ADAUSD_BITSTAMP_1h_complete_logreturns_cut         8760      100              2                 0.4610           0.5735

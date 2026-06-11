@@ -80,7 +80,7 @@ py -3 -m pip install -r requirements
 - TISEAN: [https://www.pks.mpg.de/tisean/](https://www.pks.mpg.de/tisean/)
 - gnuplot: [http://www.gnuplot.info/](http://www.gnuplot.info/)
 
-The Git repository ships **only** the orchestration `.bat` files under `Tisean_3.0.0\bin\`. Install TISEAN locally and copy **`d2.exe`**, **`lyap_k.exe`**, **`recurr.exe`**, **`c2t.exe`**, **`corr.exe`**, **`stp.exe`** into that folder (or point **`TISEAN_BIN`** at a directory that contains them).
+The repository includes the full **TISEAN 3.0.0** tree under `Tisean_3.0.0/` (C/Fortran sources plus prebuilt Windows `.exe` in `bin/`). You can rebuild from source or use the shipped binaries directly (or point **`TISEAN_BIN`** at another install).
 
 **Path resolution at run time:**
 
@@ -2961,7 +2961,7 @@ Historical mentions may remain in methodology context, but operationally the pro
 
 ## Third-party: TISEAN
 
-This repository **does not redistribute** the TISEAN source tree or compiled binaries. You install TISEAN yourself from the Max Planck Institute distribution and place `d2.exe`, `lyap_k.exe`, `recurr.exe`, etc. next to the shipped `.bat` files (or set `TISEAN_BIN`). Only the Windows orchestration scripts under `Tisean_3.0.0\bin\` are part of this project.
+This repository **includes** the TISEAN 3.0.0 source tree (`source_c/`, `source_f/`) and prebuilt Windows binaries under `Tisean_3.0.0/bin/`, plus project orchestration `.bat` scripts. Rebuild with the upstream Makefile if needed, or use the shipped `.exe` files (or set `TISEAN_BIN`).
 
 **Upstream project and documentation**
 

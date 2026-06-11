@@ -11,6 +11,7 @@ Responsibilities:
   ``hypothesis.py`` (test mode, bootstrap count, dimension metrics, etc.).
 - Browse **artifacts** (PNG/TXT under ``data/`` and ``results/``) and preview
   images with fit / 100% / custom zoom.
+- Explore **interactive 3D Takens attractors** (rotate/zoom matplotlib canvas).
 
 Child processes are started via :class:`QProcess` (not a shell), with working
 directories set per step: Python scripts run from the repo root; TISEAN
@@ -62,6 +63,8 @@ from config_loader import (
     get_results_dir,
 )
 from hypothesis_config import DEFAULT_BOOTSTRAP_SAMPLES
+from attractor_viewer import Attractor3DWidget
+from recurrence_viewer import RecurrencePlotWidget
 
 
 # Repo root — directory containing this file, used as cwd for all
@@ -297,6 +300,15 @@ class PipelineApp(QMainWindow):
         self.btn_refresh.setObjectName("btnSecondary")
         left_layout.addWidget(self.btn_refresh)
 
+        self.btn_view_attractor = QPushButton("3D attractor")
+        self.btn_view_attractor.setObjectName("btnSecondary")
+        self.btn_view_attractor.setToolTip("Open interactive Takens phase-space viewer")
+        left_layout.addWidget(self.btn_view_attractor)
+        self.btn_view_recurrence = QPushButton("Recurrence plot")
+        self.btn_view_recurrence.setObjectName("btnSecondary")
+        self.btn_view_recurrence.setToolTip("Open interactive RQA recurrence plot viewer")
+        left_layout.addWidget(self.btn_view_recurrence)
+
         test_frame = QFrame()
         test_frame.setObjectName("testModeFrame")
         test_layout = QVBoxLayout(test_frame)
@@ -480,6 +492,29 @@ class PipelineApp(QMainWindow):
 
         self.tabs.addTab(self.preview_tab, "Preview")
 
+        # Tab 4: interactive Takens 3D phase-space viewer (matplotlib canvas).
+        self.attractor_tab = QWidget()
+        attractor_layout = QVBoxLayout(self.attractor_tab)
+        attractor_layout.setContentsMargins(0, 0, 0, 0)
+        attractor_layout.setSpacing(0)
+        self.attractor_viewer = Attractor3DWidget(
+            self.config,
+            test_mode_provider=lambda: self.chk_test_mode.isChecked(),
+        )
+        attractor_layout.addWidget(self.attractor_viewer)
+        self.tabs.addTab(self.attractor_tab, "3D Attractor")
+
+        self.recurrence_tab = QWidget()
+        recurrence_layout = QVBoxLayout(self.recurrence_tab)
+        recurrence_layout.setContentsMargins(0, 0, 0, 0)
+        recurrence_layout.setSpacing(0)
+        self.recurrence_viewer = RecurrencePlotWidget(
+            self.config,
+            test_mode_provider=lambda: self.chk_test_mode.isChecked(),
+        )
+        recurrence_layout.addWidget(self.recurrence_viewer)
+        self.tabs.addTab(self.recurrence_tab, "Recurrence")
+
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
         splitter.setSizes([340, 1040])
@@ -490,6 +525,8 @@ class PipelineApp(QMainWindow):
         self.btn_stop.clicked.connect(self.stop_all)
         self.btn_clear_log.clicked.connect(self.logs.clear)
         self.btn_refresh.clicked.connect(self._load_artifacts)
+        self.btn_view_attractor.clicked.connect(self._open_attractor_tab)
+        self.btn_view_recurrence.clicked.connect(self._open_recurrence_tab)
         self.btn_open_file.clicked.connect(self._open_selected_file)
         self.btn_preview_open.clicked.connect(self._open_selected_file)
         self.btn_preview_copy_path.clicked.connect(self._copy_preview_path)
@@ -1200,7 +1237,12 @@ class PipelineApp(QMainWindow):
             self._refresh_step_list_item(idx)
         if ok:
             self._load_artifacts(log=False)
-            if self._step_produces_plots(spec):
+            if spec.name == "phase_3D.py":
+                att_idx = self.tabs.indexOf(self.attractor_tab)
+                if att_idx >= 0:
+                    self.tabs.setCurrentIndex(att_idx)
+                QTimer.singleShot(150, self.attractor_viewer.refresh)
+            elif self._step_produces_plots(spec):
                 if self._artifacts_tab is not None:
                     art_idx = self.tabs.indexOf(self._artifacts_tab)
                     if art_idx >= 0:
@@ -1331,6 +1373,20 @@ class PipelineApp(QMainWindow):
         if not self._preview_path:
             return
         QApplication.clipboard().setText(str(self._preview_path))
+
+    def _open_attractor_tab(self):
+        """Switch to the interactive 3D attractor tab and refresh the plot."""
+        idx = self.tabs.indexOf(self.attractor_tab)
+        if idx >= 0:
+            self.tabs.setCurrentIndex(idx)
+        self.attractor_viewer.refresh()
+
+    def _open_recurrence_tab(self):
+        """Switch to the recurrence plot tab and refresh."""
+        idx = self.tabs.indexOf(self.recurrence_tab)
+        if idx >= 0:
+            self.tabs.setCurrentIndex(idx)
+        self.recurrence_viewer.refresh(force=True)
 
     def _on_tab_changed(self, index: int):
         """Refit image when user switches to Preview (viewport may have changed)."""

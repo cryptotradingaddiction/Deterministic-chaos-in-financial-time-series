@@ -46,8 +46,11 @@ from config_loader import (
     default_per_coin_settings_bat_path,
     parse_per_coin_settings_bat,
     parse_theiler_w_map,
+    tau_for_symbol_from_bat,
+    tau_for_symbol_from_mutual,
     theiler_summary_path,
 )
+from invariants_correlation import extract_takens_plateau
 
 try:
     from docx import Document
@@ -115,6 +118,79 @@ class SeriesStatsRow:
     t_sd: str
 
 
+def _canonical_tau_for_sym(symbol: str, prefix: str = "TAU_D2_", config=None) -> int:
+    """Embedding delay τ for *symbol* from mutual summary or ``_per_coin_settings.bat``."""
+    cfg = config or load_config()
+    sym = str(symbol).upper()
+    if prefix == "TAU_D2_":
+        return int(tau_for_symbol_from_mutual(sym, cfg))
+    bat_tau = tau_for_symbol_from_bat(sym, prefix)
+    return int(bat_tau) if bat_tau is not None else 3
+
+
+def _canonical_tau_map(prefix: str = "TAU_D2_", config=None) -> dict[str, int]:
+    """Per-coin τ keyed by symbol for one invariant family."""
+    cfg = config or load_config()
+    return {sym: _canonical_tau_for_sym(sym, prefix, cfg) for sym in SYMS}
+
+
+def _row_tau_value(row: dict[str, str]) -> int | None:
+    """Parse the ``tau`` column from one aggregate row."""
+    token = row.get("tau")
+    if token is None:
+        return None
+    try:
+        return int(round(float(token)))
+    except (TypeError, ValueError):
+        return None
+
+
+def _select_canonical_aggregate_rows(
+    rows_by_sym: dict[str, list[dict[str, str]]],
+    tau_map: dict[str, int],
+) -> dict[str, dict[str, str]]:
+    """
+    Pick one aggregate row per symbol.
+
+    When multiple hypothesis runs exist (legacy τ sweeps), keep the row whose
+    ``tau`` matches the active per-coin setting. If several rows share that τ,
+    keep the first one in file order for deterministic output.
+    """
+    out: dict[str, dict[str, str]] = {}
+    for sym in SYMS:
+        candidates = rows_by_sym.get(sym, [])
+        if not candidates:
+            continue
+        want = tau_map.get(sym)
+        chosen: dict[str, str] | None = None
+        if want is not None:
+            for row in candidates:
+                if _row_tau_value(row) == want:
+                    chosen = row
+                    break
+        out[sym] = chosen if chosen is not None else candidates[0]
+    return out
+
+
+def _canonical_surrogate_summary(root: Path, sym: str, tau: int) -> Path | None:
+    """Resolve the canonical ``*_surrogate_summary.txt`` for one coin and τ."""
+    if not root.is_dir():
+        return None
+    for run_dir in sorted(root.glob(f"{sym}_run2_tau{tau}_*")):
+        for sub in ("hypothesis_d2", "hypothesis_lle", "hypothesis_rqa"):
+            candidate = run_dir / sub / f"{sym}_surrogate_summary.txt"
+            if candidate.is_file():
+                return candidate
+        direct = run_dir / f"{sym}_surrogate_summary.txt"
+        if direct.is_file():
+            return direct
+    needle = f"_run2_tau{tau}_"
+    for candidate in sorted(root.rglob(f"{sym}_surrogate_summary.txt")):
+        if needle in candidate.as_posix():
+            return candidate
+    return None
+
+
 def _parse_agg_col(path: Path, col_index: int, decimals: int = 4, as_int: bool = False) -> dict[str, str]:
     """
     Parse whitespace-separated aggregate files by **column index** (0-based after symbol).
@@ -141,33 +217,32 @@ def _parse_agg_col(path: Path, col_index: int, decimals: int = 4, as_int: bool =
     return out
 
 
-def _parse_agg_named_col(path: Path, col_name: str, decimals: int = 4, as_int: bool = False) -> dict[str, str]:
+def _parse_agg_named_col(
+    path: Path,
+    col_name: str,
+    decimals: int = 4,
+    as_int: bool = False,
+    tau_map: dict[str, int] | None = None,
+) -> dict[str, str]:
     """
     Parse ``_hypothesis_aggregate_summary.txt``-style files by **column name**.
 
     Expects a header line starting with ``Symbol ``; data rows start with a known sym.
+    When several rows exist per symbol, the row matching :paramref:`tau_map` wins.
     Returns an empty dict if the aggregate file is missing (e.g. the user has
     only run a subset of the invariant batches), so the Word document still
     builds with empty cells in the missing column.
     """
-    if not path.is_file():
-        return {}
-    txt = path.read_text(encoding="utf-8", errors="ignore")
-    header: list[str] | None = None
+    _, rows = _parse_aggregate_rows(path, tau_map=tau_map)
     out: dict[str, str] = {}
-    for line in txt.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("Symbol "):
-            header = stripped.split()
+    for sym, row in rows.items():
+        token = row.get(col_name)
+        if token is None:
             continue
-        m = re.match(r"^(ADAUSD|BTCUSD|DOGEUSD|ETHUSD|LINKUSD|LTCUSD|XRPUSD)\s+", stripped)
-        if not m or header is None:
+        try:
+            val = float(token)
+        except (TypeError, ValueError):
             continue
-        parts = stripped.split()
-        if col_name not in header or len(parts) <= header.index(col_name):
-            continue
-        sym = parts[0]
-        val = float(parts[header.index(col_name)])
         if as_int:
             out[sym] = str(int(round(val)))
         else:
@@ -186,17 +261,13 @@ def _format_float_token(token: str, decimals: int = 4) -> str:
     return f"{val:.{decimals}f}"
 
 
-def _parse_aggregate_rows(path: Path) -> tuple[list[str], dict[str, dict[str, str]]]:
-    """Return (header_names, {symbol: {col_name: token}}) from a hypothesis aggregate file.
-
-    Returns ``([], {})`` when the aggregate file is missing so the caller can
-    still emit per-coin rows with empty / nan cells for that family.
-    """
+def _parse_aggregate_row_lists(path: Path) -> tuple[list[str], dict[str, list[dict[str, str]]]]:
+    """Return all aggregate rows per symbol (preserving file order)."""
     if not path.is_file():
         return [], {}
     txt = path.read_text(encoding="utf-8", errors="ignore")
     header: list[str] = []
-    rows: dict[str, dict[str, str]] = {}
+    rows: dict[str, list[dict[str, str]]] = {}
     for line in txt.splitlines():
         stripped = line.strip()
         if stripped.startswith("Symbol "):
@@ -207,8 +278,27 @@ def _parse_aggregate_rows(path: Path) -> tuple[list[str], dict[str, dict[str, st
             continue
         parts = stripped.split()
         sym = parts[0]
-        rows[sym] = {name: parts[i] for i, name in enumerate(header) if i < len(parts)}
+        rows.setdefault(sym, []).append(
+            {name: parts[i] for i, name in enumerate(header) if i < len(parts)}
+        )
     return header, rows
+
+
+def _parse_aggregate_rows(
+    path: Path,
+    tau_map: dict[str, int] | None = None,
+) -> tuple[list[str], dict[str, dict[str, str]]]:
+    """Return (header_names, {symbol: canonical_row}) from a hypothesis aggregate file.
+
+    Returns ``([], {})`` when the aggregate file is missing so the caller can
+    still emit per-coin rows with empty / nan cells for that family.
+    """
+    header, rows_by_sym = _parse_aggregate_row_lists(path)
+    if not rows_by_sym:
+        return header, {}
+    if tau_map is None:
+        tau_map = _canonical_tau_map()
+    return header, _select_canonical_aggregate_rows(rows_by_sym, tau_map)
 
 
 @dataclass
@@ -310,10 +400,15 @@ def _collect_surrogate_rows(config=None) -> list[SurrogateRow]:
         "normal": "normal",
         "t3.5": "t3.5",
     }
+    agg_tau_maps = {
+        dim_agg: _canonical_tau_map("TAU_D2_", cfg),
+        lle_agg: _canonical_tau_map("TAU_LLE_", cfg),
+        rqa_agg: _canonical_tau_map("TAU_RQA_", cfg),
+    }
     parsed = {}
     for path in set(sources.values()):
         if path.exists():
-            _header, rows = _parse_aggregate_rows(path)
+            _header, rows = _parse_aggregate_rows(path, tau_map=agg_tau_maps.get(path))
             parsed[path] = rows
     out: list[SurrogateRow] = []
     for sym in SYMS:
@@ -383,16 +478,15 @@ def _parse_series_stats_from_summary(path: Path) -> dict[str, tuple[str, str]]:
 
 def _collect_series_stats_rows(config=None) -> list[SeriesStatsRow]:
     # The input-series statistics are properties of the generated time series,
-    # not of individual invariants. Use the D2/Takens summaries as one
-    # representative source to avoid repeating identical rows per invariant.
+    # not of individual invariants. Use the canonical D2/Takens run per coin.
     cfg = config or load_config()
     root = hypothesis_correlation_dimension_dir(cfg)
+    tau_map = _canonical_tau_map("TAU_D2_", cfg)
     per_symbol: dict[str, dict[str, tuple[str, str]]] = {}
-    if root.exists():
-        for fp in root.rglob("*_surrogate_summary.txt"):
-            sym = fp.name.replace("_surrogate_summary.txt", "")
-            if sym in SYMS:
-                per_symbol[sym] = _parse_series_stats_from_summary(fp)
+    for sym in SYMS:
+        fp = _canonical_surrogate_summary(root, sym, tau_map[sym])
+        if fp is not None:
+            per_symbol[sym] = _parse_series_stats_from_summary(fp)
     out: list[SeriesStatsRow] = []
     for sym in SYMS:
         stats = per_symbol.get(sym, {})
@@ -420,28 +514,12 @@ def _parse_tau_map(config=None) -> dict[str, str]:
     """
     Embedding delay τ per symbol for the Word table.
 
-    Prefer the ``tau`` column in ``_hypothesis_aggregate_summary.txt`` (same values
-    passed to ``hypothesis.py --delay``). Fall back to ``TAU_D2_<sym>`` in
-    ``_per_coin_settings.bat`` when the aggregate is missing or empty.
+    Uses the active per-coin setting from ``mutual/_mi_summary.txt`` (or
+    ``TAU_D2_<sym>`` in ``_per_coin_settings.bat``), matching the canonical
+    hypothesis run folders ``<sym>_run2_tau<tau>_W<tau>``.
     """
     cfg = config or load_config()
-    path = hypothesis_correlation_dimension_dir(cfg) / "_hypothesis_aggregate_summary.txt"
-    out: dict[str, str] = {}
-    if path.is_file():
-        out = _parse_agg_named_col(path, "tau", as_int=True)
-    if len(out) < len(SYMS):
-        bat = parse_per_coin_settings_bat(default_per_coin_settings_bat_path())
-        sk = {k.upper(): v for k, v in bat.items()}
-        for sym in SYMS:
-            if sym in out and out[sym]:
-                continue
-            raw = sk.get(f"TAU_D2_{sym}")
-            if raw is not None:
-                try:
-                    out[sym] = str(int(float(raw)))
-                except (TypeError, ValueError):
-                    pass
-    return out
+    return {sym: str(_canonical_tau_for_sym(sym, "TAU_D2_", cfg)) for sym in SYMS}
 
 
 def _parse_tauw_map() -> dict[str, str]:
@@ -497,38 +575,70 @@ def _parse_start_end_n() -> tuple[dict[str, str], dict[str, str], dict[str, str]
 
 
 def _parse_takens(config=None) -> dict[str, str]:
-    """Original-series TAKENS plateau mean (D_T) from dimension aggregate."""
+    """Original-series TAKENS plateau mean (D_T) from the canonical ``*_takens.dat`` run."""
     cfg = config or load_config()
-    return _parse_agg_named_col(
-        hypothesis_correlation_dimension_dir(cfg) / "_hypothesis_aggregate_summary.txt",
-        "TAKENS_orig",
-        decimals=4,
-    )
+    root = hypothesis_correlation_dimension_dir(cfg)
+    tau_map = _canonical_tau_map("TAU_D2_", cfg)
+    out: dict[str, str] = {}
+    csv_path = root / "_takens_summary.csv"
+    if csv_path.is_file():
+        df = pd.read_csv(csv_path)
+        for sym in SYMS:
+            sub = df[df["symbol"] == sym]
+            if sub.empty:
+                continue
+            want = tau_map.get(sym)
+            row = None
+            if want is not None:
+                match = sub[sub["tau"] == want]
+                if not match.empty:
+                    row = match.iloc[0]
+            if row is None:
+                row = sub.iloc[0]
+            takens_file = Path(str(row["takens_file"]))
+            if not takens_file.is_file():
+                continue
+            mean_val, *_rest = extract_takens_plateau(str(takens_file), dim=3)
+            if pd.notna(mean_val):
+                out[sym] = f"{float(mean_val):.4f}"
+    agg_path = root / "_hypothesis_aggregate_summary.txt"
+    if agg_path.is_file():
+        for sym, val in _parse_agg_named_col(
+            agg_path, "TAKENS_orig", decimals=4, tau_map=tau_map
+        ).items():
+            if sym not in out and val:
+                out[sym] = val
+    return out
 
 
 def _parse_ellner(config=None) -> dict[str, str]:
     """Original-series ELLNER extension (D_E) from dimension aggregate."""
     cfg = config or load_config()
+    tau_map = _canonical_tau_map("TAU_D2_", cfg)
     return _parse_agg_named_col(
         hypothesis_correlation_dimension_dir(cfg) / "_hypothesis_aggregate_summary.txt",
         "ELLNER_orig",
         decimals=4,
+        tau_map=tau_map,
     )
 
 
 def _parse_lle(config=None) -> dict[str, str]:
     """Original-series LLE (λ_max proxy) from LLE aggregate."""
     cfg = config or load_config()
+    tau_map = _canonical_tau_map("TAU_LLE_", cfg)
     return _parse_agg_named_col(
         hypothesis_lambda_max_dir(cfg) / "_hypothesis_aggregate_summary.txt",
         "LLE_orig",
         decimals=4,
+        tau_map=tau_map,
     )
 
 
 def _parse_rqa_row(metric_col: str, decimals: int = 4, config=None) -> dict[str, str]:
     """One RQA scalar column from the RQA hypothesis aggregate (orig values)."""
     cfg = config or load_config()
+    tau_map = _canonical_tau_map("TAU_RQA_", cfg)
     col_name = {
         "RR_orig_mean": "RR_orig",
         "DET_orig_mean": "DET_orig",
@@ -543,6 +653,7 @@ def _parse_rqa_row(metric_col: str, decimals: int = 4, config=None) -> dict[str,
         col_name,
         decimals=decimals,
         as_int=(metric_col == "MAXLINE_orig_mean"),
+        tau_map=tau_map,
     )
 
 

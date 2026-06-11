@@ -204,3 +204,81 @@ def extract_tagged_block(path, dim=M_D2, tag="#dim"):
     except Exception:
         return np.empty((0, 2), dtype=float)
     return np.array(rows, dtype=float)
+
+
+def run_boxcount(
+    data_file,
+    delay,
+    max_embed,
+    output_prefix,
+    *,
+    q=0.0,
+    eps_steps=40,
+    skip_rows=0,
+    column=None,
+):
+    """Run TISEAN boxcount.exe (partition Renyi entropy / capacity dimension).
+
+    For capacity dimension D_0 use ``q=0``. Output is written to ``output_prefix``
+    (no automatic ``.box`` suffix when ``-o`` is set). Pass basenames with
+    ``cwd`` set to the output directory (same FORTRAN path workaround as d2).
+    """
+    cwd = os.path.dirname(os.path.abspath(output_prefix)) or "."
+    out_base = os.path.basename(output_prefix)
+    data_abs = os.path.abspath(data_file)
+    cmd = [
+        resolve_tool("boxcount"),
+        f"-d{int(delay)}",
+        f"-M1,{int(max_embed)}",
+        f"-Q{q}",
+        f"-#{int(eps_steps)}",
+        "-V0",
+        "-o",
+        out_base,
+    ]
+    if skip_rows:
+        cmd.append(f"-x{int(skip_rows)}")
+    if column is not None:
+        cmd.append(f"-c{int(column)}")
+    cmd.append(data_abs)
+    subprocess.run(cmd, cwd=cwd, check=True, capture_output=True, text=True)
+    return output_prefix
+
+
+def parse_boxcount_blocks(path):
+    """Parse boxcount output into ``{embedding_m: ndarray(n,3)}``.
+
+    Columns: epsilon, H_Q(m, epsilon), differential H_Q(m)-H_Q(m-1).
+    """
+    blocks = {}
+    current_embed = None
+    try:
+        with open(path, "r", encoding="utf-8", errors="ignore") as handle:
+            for line in handle:
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                if stripped.startswith("#component"):
+                    try:
+                        part = stripped.split("embedding =", 1)[1].strip()
+                        current_embed = int(part)
+                        blocks[current_embed] = []
+                    except (ValueError, IndexError):
+                        current_embed = None
+                    continue
+                if stripped.startswith("#") or stripped.startswith("!"):
+                    continue
+                if current_embed is None:
+                    continue
+                parts = stripped.split()
+                if len(parts) < 3:
+                    continue
+                try:
+                    blocks[current_embed].append(
+                        (float(parts[0]), float(parts[1]), float(parts[2]))
+                    )
+                except ValueError:
+                    continue
+    except OSError:
+        return {}
+    return {k: np.array(v, dtype=float) for k, v in blocks.items() if v}

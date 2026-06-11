@@ -40,3 +40,5 @@ PyYAML>=6.0,<7
 
 # --- Desktop GUI (optional; omit if you only use CLI / batch) ---
 PySide6>=6.5,<7
+pyqtgraph>=0.13,<1
+PyOpenGL>=3.1,<4

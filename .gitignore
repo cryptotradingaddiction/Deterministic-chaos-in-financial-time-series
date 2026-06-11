@@ -20,15 +20,17 @@ config.yaml
 github/
 Sablona-zaverecne-prace-FFU.docx
 
-# Local MPI TISEAN tree (sources, docs, *.exe). Repo tracks only the project's
-# own orchestration scripts under `Tisean_3.0.0/bin/`; install upstream
-# binaries from https://www.pks.mpg.de/tisean/ after clone (see README).
-/Tisean_3.0.0/*
-!/Tisean_3.0.0/bin/
-/Tisean_3.0.0/bin/*
-!/Tisean_3.0.0/bin/*.bat
-!/Tisean_3.0.0/bin/detect_theiler.py
-
+# TISEAN 3.0.0 — sources + prebuilt Windows binaries (see README for build notes)
+!/Tisean_3.0.0/
+!/Tisean_3.0.0/**
+/Tisean_3.0.0/bin/smoke/
+/Tisean_3.0.0/bin/__pycache__/
+/Tisean_3.0.0/**/__pycache__/
+/Tisean_3.0.0/**/config.*
+/Tisean_3.0.0/install.log
+/Tisean_3.0.0/missing.log
+/Tisean_3.0.0/**/*~
+/Tisean_3.0.0/**/#*#
 # PyInstaller / packaging artifacts
 *.manifest
 

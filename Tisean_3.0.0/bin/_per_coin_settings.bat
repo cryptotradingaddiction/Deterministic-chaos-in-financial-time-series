@@ -24,35 +24,35 @@ REM Each TAU_* below is overwritten when you run mutual.py (first MI minimum →
 REM ----------------------------------------------------------------------------
 
 REM ---- Takens/Ellner dimension settings (d2.exe + c2t.exe pipeline) ----------
-set TAU_D2_BTCUSD=5
+set TAU_D2_BTCUSD=3
 set TAU_D2_ETHUSD=3
-set TAU_D2_LTCUSD=3
-set TAU_D2_XRPUSD=3
-set TAU_D2_LINKUSD=4
-set TAU_D2_DOGEUSD=6
+set TAU_D2_LTCUSD=2
+set TAU_D2_XRPUSD=2
+set TAU_D2_LINKUSD=3
+set TAU_D2_DOGEUSD=4
 set TAU_D2_ADAUSD=2
-set W_D2_BTCUSD=5
+set W_D2_BTCUSD=3
 set W_D2_ETHUSD=3
-set W_D2_LTCUSD=3
-set W_D2_XRPUSD=3
-set W_D2_LINKUSD=4
-set W_D2_DOGEUSD=6
+set W_D2_LTCUSD=2
+set W_D2_XRPUSD=2
+set W_D2_LINKUSD=3
+set W_D2_DOGEUSD=4
 set W_D2_ADAUSD=2
 REM ---- Largest Lyapunov exponent (lyap_k) -----------------------------------
-set TAU_LLE_BTCUSD=5
+set TAU_LLE_BTCUSD=3
 set TAU_LLE_ETHUSD=3
-set TAU_LLE_LTCUSD=3
-set TAU_LLE_XRPUSD=3
-set TAU_LLE_LINKUSD=4
-set TAU_LLE_DOGEUSD=6
+set TAU_LLE_LTCUSD=2
+set TAU_LLE_XRPUSD=2
+set TAU_LLE_LINKUSD=3
+set TAU_LLE_DOGEUSD=4
 set TAU_LLE_ADAUSD=2
 REM ---- RQA (recurr) - tau and recurrence threshold radius -------------------
-set TAU_RQA_BTCUSD=5
+set TAU_RQA_BTCUSD=3
 set TAU_RQA_ETHUSD=3
-set TAU_RQA_LTCUSD=3
-set TAU_RQA_XRPUSD=3
-set TAU_RQA_LINKUSD=4
-set TAU_RQA_DOGEUSD=6
+set TAU_RQA_LTCUSD=2
+set TAU_RQA_XRPUSD=2
+set TAU_RQA_LINKUSD=3
+set TAU_RQA_DOGEUSD=4
 set TAU_RQA_ADAUSD=2
 set RAD_RQA_BTCUSD=0.005
 set RAD_RQA_ETHUSD=0.005

@@ -7,7 +7,9 @@
 
 This repository serves as a storage for codebase used in my bachelor's thesis focused on "Determining the presence of deterministic chaos in financial time series", released in June 2026 in Czech, at Prague University of Economics and Business (VŠE v Praze).
 &nbsp; 
-Link:
+&nbsp; 
+&nbsp; 
+Link: https://vskp.vse.cz/101769
 This project combines:
 &nbsp;
 - data download from exchange APIs (`ccxt`),
